@@ -1,5 +1,5 @@
 {
-  "name": "webcodecs-node",
+  "name": "node-webcodecs",
   "version": "0.1.0",
   "description": "Native WebCodecs API implementation for Node.js using FFmpeg",
   "main": "dist/index.js",

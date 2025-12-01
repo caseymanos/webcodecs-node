@@ -1,6 +1,8 @@
-# webcodecs-node
+# node-webcodecs
 
 Native WebCodecs API implementation for Node.js, using FFmpeg for encoding and decoding.
+
+[![npm version](https://badge.fury.io/js/node-webcodecs.svg)](https://www.npmjs.com/package/node-webcodecs)
 
 ## Features
 
@@ -34,7 +36,7 @@ Install FFmpeg and add to PATH, or use vcpkg.
 ## Installation
 
 ```bash
-npm install webcodecs-node
+npm install node-webcodecs
 ```
 
 ## Quick Start
@@ -42,7 +44,7 @@ npm install webcodecs-node
 ### Video Encoding
 
 ```javascript
-const { VideoEncoder, VideoFrame } = require('webcodecs-node');
+const { VideoEncoder, VideoFrame } = require('node-webcodecs');
 
 const encoder = new VideoEncoder({
   output: (chunk, metadata) => {
@@ -76,7 +78,7 @@ encoder.close();
 ### Video Decoding
 
 ```javascript
-const { VideoDecoder, EncodedVideoChunk } = require('webcodecs-node');
+const { VideoDecoder, EncodedVideoChunk } = require('node-webcodecs');
 
 const decoder = new VideoDecoder({
   output: (frame) => {
@@ -101,7 +103,7 @@ decoder.close();
 ### Audio Encoding
 
 ```javascript
-const { AudioEncoder, AudioData } = require('webcodecs-node');
+const { AudioEncoder, AudioData } = require('node-webcodecs');
 
 const encoder = new AudioEncoder({
   output: (chunk, metadata) => {
