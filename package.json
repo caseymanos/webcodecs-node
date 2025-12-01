@@ -1,0 +1,89 @@
+{
+  "name": "webcodecs-node",
+  "version": "0.1.0",
+  "description": "Native WebCodecs API implementation for Node.js using FFmpeg",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "npm run build:native && npm run build:ts",
+    "build:native": "cmake-js compile",
+    "build:ts": "tsc",
+    "rebuild": "cmake-js rebuild",
+    "test": "jest --forceExit",
+    "test:integration": "node test/integration/encode-decode.test.js && node test/integration/audio-encode-decode.test.js && node test/integration/vp8-vp9-encode-decode.test.js && node test/integration/hevc-av1-encode-decode.test.js",
+    "prebuild": "prebuildify --napi --strip",
+    "prebuild:ci": "prebuildify-ci",
+    "install": "node-gyp-build || cmake-js compile",
+    "prepublishOnly": "npm run build:ts && npm test",
+    "lint": "eslint src/**/*.ts"
+  },
+  "keywords": [
+    "webcodecs",
+    "video",
+    "audio",
+    "encoder",
+    "decoder",
+    "ffmpeg",
+    "h264",
+    "hevc",
+    "vp8",
+    "vp9",
+    "av1",
+    "aac",
+    "opus",
+    "media"
+  ],
+  "author": "caseymanos",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/caseymanos/webcodecs-node.git"
+  },
+  "bugs": {
+    "url": "https://github.com/caseymanos/webcodecs-node/issues"
+  },
+  "homepage": "https://github.com/caseymanos/webcodecs-node#readme",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "os": [
+    "darwin",
+    "linux",
+    "win32"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ],
+  "files": [
+    "dist/",
+    "native/",
+    "prebuilds/",
+    "CMakeLists.txt",
+    "README.md",
+    "examples/",
+    "binding.gyp"
+  ],
+  "dependencies": {
+    "node-addon-api": "^7.0.0",
+    "node-gyp-build": "^4.8.4"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.0.0",
+    "@types/node": "^20.0.0",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "cmake-js": "^7.3.0",
+    "eslint": "^8.0.0",
+    "jest": "^29.0.0",
+    "prebuildify": "^6.0.1",
+    "prebuildify-ci": "^1.0.5",
+    "ts-jest": "^29.0.0",
+    "typescript": "^5.3.0"
+  },
+  "binary": {
+    "napi_versions": [
+      8
+    ]
+  }
+}

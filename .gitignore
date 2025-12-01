@@ -1,0 +1,34 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+build/
+dist/
+prebuilds/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Test outputs
+examples/output/
+coverage/
+
+# Environment
+.env
+.env.local
+
+# Temporary files
+*.tmp
+*.temp
+examples/big_buck_bunny.mp4

@@ -1,0 +1,24 @@
+# Source files (use dist/ for published package)
+src/
+native/
+test/
+
+# Build artifacts (platform-specific)
+build/
+
+# Development files
+.git/
+.github/
+.vscode/
+*.log
+.DS_Store
+
+# Config files
+tsconfig.json
+jest.config.js
+CMakeLists.txt
+.eslintrc*
+.prettierrc*
+
+# Documentation source (README.md is included)
+docs/
