@@ -37,12 +37,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/caseymanos/webcodecs-node.git"
+    "url": "git+https://github.com/caseymanos/node-webcodecs.git"
   },
   "bugs": {
-    "url": "https://github.com/caseymanos/webcodecs-node/issues"
+    "url": "https://github.com/caseymanos/node-webcodecs/issues"
   },
-  "homepage": "https://github.com/caseymanos/webcodecs-node#readme",
+  "homepage": "https://github.com/caseymanos/node-webcodecs#readme",
   "engines": {
     "node": ">=18.0.0"
   },
