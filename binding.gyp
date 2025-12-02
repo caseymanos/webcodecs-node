@@ -3,11 +3,12 @@
     {
       "target_name": "webcodecs_node",
       "sources": [
-        "native/addon.cpp",
+        "native/binding.cpp",
         "native/frame.cpp",
         "native/audio.cpp",
         "native/encoder.cpp",
-        "native/decoder.cpp"
+        "native/decoder.cpp",
+        "native/util.cpp"
       ],
       "include_dirs": [
         "<!@(node -p \"require('node-addon-api').include\")",
