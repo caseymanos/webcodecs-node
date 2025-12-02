@@ -1,5 +1,6 @@
 #include "encoder.h"
 #include "frame.h"
+#include "hw_accel.h"
 
 Napi::FunctionReference VideoEncoderNative::constructor;
 
@@ -24,6 +25,10 @@ VideoEncoderNative::VideoEncoderNative(const Napi::CallbackInfo& info)
     , codecCtx_(nullptr)
     , codec_(nullptr)
     , swsCtx_(nullptr)
+    , hwType_(HWAccel::Type::None)
+    , hwDeviceCtx_(nullptr)
+    , hwFramesCtx_(nullptr)
+    , hwInputFormat_(AV_PIX_FMT_NONE)
     , configured_(false)
     , avcAnnexB_(true)
     , width_(0)
@@ -46,8 +51,64 @@ VideoEncoderNative::~VideoEncoderNative() {
         sws_freeContext(swsCtx_);
     }
 
+    if (hwFramesCtx_) {
+        av_buffer_unref(&hwFramesCtx_);
+    }
+
+    if (hwDeviceCtx_) {
+        av_buffer_unref(&hwDeviceCtx_);
+    }
+
     if (codecCtx_) {
         avcodec_free_context(&codecCtx_);
+    }
+}
+
+void VideoEncoderNative::configureEncoderOptions(const std::string& encoderName, const std::string& latencyMode) {
+    if (encoderName == "libx264") {
+        if (latencyMode == "realtime") {
+            av_opt_set(codecCtx_->priv_data, "preset", "ultrafast", 0);
+            av_opt_set(codecCtx_->priv_data, "tune", "zerolatency", 0);
+        } else {
+            av_opt_set(codecCtx_->priv_data, "preset", "medium", 0);
+        }
+    }
+    else if (encoderName == "h264_videotoolbox" || encoderName == "hevc_videotoolbox") {
+        av_opt_set(codecCtx_->priv_data, "realtime",
+                   latencyMode == "realtime" ? "1" : "0", 0);
+        av_opt_set(codecCtx_->priv_data, "allow_sw", "1", 0);  // Allow software fallback
+    }
+    else if (encoderName == "h264_nvenc" || encoderName == "hevc_nvenc") {
+        if (latencyMode == "realtime") {
+            av_opt_set(codecCtx_->priv_data, "preset", "p1", 0);  // Fastest
+            av_opt_set(codecCtx_->priv_data, "tune", "ll", 0);    // Low latency
+            av_opt_set(codecCtx_->priv_data, "zerolatency", "1", 0);
+        } else {
+            av_opt_set(codecCtx_->priv_data, "preset", "p4", 0);  // Balanced
+        }
+        av_opt_set(codecCtx_->priv_data, "rc", "cbr", 0);
+    }
+    else if (encoderName == "h264_qsv" || encoderName == "hevc_qsv") {
+        if (latencyMode == "realtime") {
+            av_opt_set(codecCtx_->priv_data, "preset", "veryfast", 0);
+            av_opt_set(codecCtx_->priv_data, "low_delay_brc", "1", 0);
+        }
+    }
+    else if (encoderName == "libvpx" || encoderName == "libvpx-vp9") {
+        // VP8/VP9 options
+        if (codecCtx_->bit_rate > 0) {
+            av_opt_set_int(codecCtx_->priv_data, "crf", 10, 0);
+            av_opt_set_int(codecCtx_->priv_data, "b", codecCtx_->bit_rate, 0);
+        }
+        av_opt_set_int(codecCtx_->priv_data, "cpu-used", 4, 0);
+    }
+    else if (encoderName == "libx265") {
+        av_opt_set(codecCtx_->priv_data, "preset", latencyMode == "realtime" ? "ultrafast" : "medium", 0);
+    }
+    else if (encoderName == "libaom-av1" || encoderName == "libsvtav1") {
+        if (latencyMode == "realtime") {
+            av_opt_set_int(codecCtx_->priv_data, "cpu-used", 8, 0);
+        }
     }
 }
 
@@ -62,11 +123,39 @@ void VideoEncoderNative::Configure(const Napi::CallbackInfo& info) {
     Napi::Object config = info[0].As<Napi::Object>();
     std::string codecName = config.Get("codec").As<Napi::String>().Utf8Value();
 
-    codec_ = avcodec_find_encoder_by_name(codecName.c_str());
-    if (!codec_) {
-        Napi::Error::New(env, "Codec not found: " + codecName).ThrowAsJavaScriptException();
-        return;
+    // Required parameters
+    width_ = config.Get("width").As<Napi::Number>().Int32Value();
+    height_ = config.Get("height").As<Napi::Number>().Int32Value();
+
+    // Parse hardware acceleration preference
+    HWAccel::Preference hwPref = HWAccel::Preference::NoPreference;
+    if (config.Has("hardwareAcceleration")) {
+        std::string pref = config.Get("hardwareAcceleration").As<Napi::String>().Utf8Value();
+        hwPref = HWAccel::parsePreference(pref);
     }
+
+    // Select encoder based on preference and availability
+    HWAccel::EncoderInfo encInfo = HWAccel::selectEncoder(codecName, hwPref, width_, height_);
+
+    if (!encInfo.codec) {
+        // Fall back to direct codec lookup
+        codec_ = avcodec_find_encoder_by_name(codecName.c_str());
+        if (!codec_) {
+            Napi::Error::New(env, "No suitable encoder found for: " + codecName)
+                .ThrowAsJavaScriptException();
+            return;
+        }
+        hwType_ = HWAccel::Type::None;
+        hwInputFormat_ = AV_PIX_FMT_YUV420P;
+    } else {
+        codec_ = encInfo.codec;
+        hwType_ = encInfo.hwType;
+        hwInputFormat_ = encInfo.inputFormat;
+    }
+
+    // Log which encoder was selected (for debugging)
+    // printf("[node-webcodecs] Selected encoder: %s (%s)\n",
+    //        codec_->name, HWAccel::getTypeName(hwType_));
 
     codecCtx_ = avcodec_alloc_context3(codec_);
     if (!codecCtx_) {
@@ -74,13 +163,8 @@ void VideoEncoderNative::Configure(const Napi::CallbackInfo& info) {
         return;
     }
 
-    // Required parameters
-    width_ = config.Get("width").As<Napi::Number>().Int32Value();
-    height_ = config.Get("height").As<Napi::Number>().Int32Value();
-
     codecCtx_->width = width_;
     codecCtx_->height = height_;
-    codecCtx_->pix_fmt = AV_PIX_FMT_YUV420P;  // H.264 requires YUV420P
 
     // Time base - default to 1/1000000 (microseconds)
     codecCtx_->time_base = { 1, 1000000 };
@@ -93,66 +177,73 @@ void VideoEncoderNative::Configure(const Napi::CallbackInfo& info) {
     }
 
     // Framerate for GOP calculation
+    int fps = 30;
     if (config.Has("framerate")) {
-        int fps = config.Get("framerate").As<Napi::Number>().Int32Value();
-        codecCtx_->gop_size = fps;  // Keyframe every second
-        codecCtx_->framerate = { fps, 1 };
-    } else {
-        codecCtx_->gop_size = 30;
-        codecCtx_->framerate = { 30, 1 };
+        fps = config.Get("framerate").As<Napi::Number>().Int32Value();
     }
+    codecCtx_->gop_size = fps;  // Keyframe every second
+    codecCtx_->framerate = { fps, 1 };
 
     // Max B-frames
     codecCtx_->max_b_frames = 0;  // Disable B-frames for lower latency
 
-    // H.264 specific options
-    if (codecName == "libx264") {
-        // Profile
-        if (config.Has("profile")) {
-            int profile = config.Get("profile").As<Napi::Number>().Int32Value();
-            switch (profile) {
-                case 66: av_opt_set(codecCtx_->priv_data, "profile", "baseline", 0); break;
-                case 77: av_opt_set(codecCtx_->priv_data, "profile", "main", 0); break;
-                case 100: av_opt_set(codecCtx_->priv_data, "profile", "high", 0); break;
-                default: av_opt_set(codecCtx_->priv_data, "profile", "main", 0); break;
+    // Set pixel format based on encoder type
+    if (hwType_ != HWAccel::Type::None && hwInputFormat_ != AV_PIX_FMT_NONE) {
+        codecCtx_->pix_fmt = hwInputFormat_;
+    } else {
+        codecCtx_->pix_fmt = AV_PIX_FMT_YUV420P;
+    }
+
+    // Setup hardware device context if needed
+    if (hwType_ != HWAccel::Type::None) {
+        hwDeviceCtx_ = HWAccel::createHWDeviceContext(hwType_);
+
+        if (hwDeviceCtx_) {
+            codecCtx_->hw_device_ctx = av_buffer_ref(hwDeviceCtx_);
+        }
+
+        // Setup hardware frames context for VAAPI
+        if (encInfo.requiresHWFrames && hwDeviceCtx_) {
+            hwFramesCtx_ = av_hwframe_ctx_alloc(hwDeviceCtx_);
+            if (hwFramesCtx_) {
+                AVHWFramesContext* framesCtx = (AVHWFramesContext*)hwFramesCtx_->data;
+                framesCtx->format = hwInputFormat_;
+                framesCtx->sw_format = AV_PIX_FMT_NV12;
+                framesCtx->width = width_;
+                framesCtx->height = height_;
+                framesCtx->initial_pool_size = 20;
+
+                if (av_hwframe_ctx_init(hwFramesCtx_) >= 0) {
+                    codecCtx_->hw_frames_ctx = av_buffer_ref(hwFramesCtx_);
+                }
             }
         }
-
-        // Preset for speed/quality tradeoff
-        std::string latencyMode = "quality";
-        if (config.Has("latencyMode")) {
-            latencyMode = config.Get("latencyMode").As<Napi::String>().Utf8Value();
-        }
-
-        if (latencyMode == "realtime") {
-            av_opt_set(codecCtx_->priv_data, "preset", "ultrafast", 0);
-            av_opt_set(codecCtx_->priv_data, "tune", "zerolatency", 0);
-        } else {
-            av_opt_set(codecCtx_->priv_data, "preset", "medium", 0);
-        }
-
-        // AVC format (Annex B vs AVCC)
-        if (config.Has("avcFormat")) {
-            std::string format = config.Get("avcFormat").As<Napi::String>().Utf8Value();
-            avcAnnexB_ = (format == "annexb");
-        }
-    } else if (codecName == "libvpx" || codecName == "libvpx-vp9") {
-        // VP8/VP9 options
-        codecCtx_->pix_fmt = AV_PIX_FMT_YUV420P;
-
-        // Quality setting
-        if (config.Has("bitrate")) {
-            av_opt_set_int(codecCtx_->priv_data, "crf", 10, 0);
-            av_opt_set_int(codecCtx_->priv_data, "b", codecCtx_->bit_rate, 0);
-        }
-
-        // Speed
-        av_opt_set_int(codecCtx_->priv_data, "cpu-used", 4, 0);
-    } else if (codecName == "libx265") {
-        // HEVC options
-        codecCtx_->pix_fmt = AV_PIX_FMT_YUV420P;
-        av_opt_set(codecCtx_->priv_data, "preset", "medium", 0);
     }
+
+    // Profile (for H.264)
+    std::string encoderName = codec_->name;
+    if (encoderName == "libx264" && config.Has("profile")) {
+        int profile = config.Get("profile").As<Napi::Number>().Int32Value();
+        switch (profile) {
+            case 66: av_opt_set(codecCtx_->priv_data, "profile", "baseline", 0); break;
+            case 77: av_opt_set(codecCtx_->priv_data, "profile", "main", 0); break;
+            case 100: av_opt_set(codecCtx_->priv_data, "profile", "high", 0); break;
+            default: av_opt_set(codecCtx_->priv_data, "profile", "main", 0); break;
+        }
+    }
+
+    // AVC format (Annex B vs AVCC)
+    if (config.Has("avcFormat")) {
+        std::string format = config.Get("avcFormat").As<Napi::String>().Utf8Value();
+        avcAnnexB_ = (format == "annexb");
+    }
+
+    // Configure encoder-specific options
+    std::string latencyMode = "quality";
+    if (config.Has("latencyMode")) {
+        latencyMode = config.Get("latencyMode").As<Napi::String>().Utf8Value();
+    }
+    configureEncoderOptions(encoderName, latencyMode);
 
     // Open codec
     int ret = avcodec_open2(codecCtx_, codec_, nullptr);
@@ -160,8 +251,53 @@ void VideoEncoderNative::Configure(const Napi::CallbackInfo& info) {
         char errBuf[256];
         av_strerror(ret, errBuf, sizeof(errBuf));
         avcodec_free_context(&codecCtx_);
-        Napi::Error::New(env, std::string("Failed to open codec: ") + errBuf).ThrowAsJavaScriptException();
-        return;
+
+        // If HW encoder failed, try software fallback
+        if (hwType_ != HWAccel::Type::None && hwPref != HWAccel::Preference::PreferHardware) {
+            // Reset and try software
+            if (hwDeviceCtx_) {
+                av_buffer_unref(&hwDeviceCtx_);
+                hwDeviceCtx_ = nullptr;
+            }
+            if (hwFramesCtx_) {
+                av_buffer_unref(&hwFramesCtx_);
+                hwFramesCtx_ = nullptr;
+            }
+
+            HWAccel::EncoderInfo swInfo = HWAccel::selectEncoder(codecName, HWAccel::Preference::PreferSoftware, width_, height_);
+            if (swInfo.codec) {
+                codec_ = swInfo.codec;
+                hwType_ = HWAccel::Type::None;
+                hwInputFormat_ = swInfo.inputFormat;
+
+                codecCtx_ = avcodec_alloc_context3(codec_);
+                codecCtx_->width = width_;
+                codecCtx_->height = height_;
+                codecCtx_->time_base = { 1, 1000000 };
+                codecCtx_->bit_rate = config.Has("bitrate") ?
+                    config.Get("bitrate").As<Napi::Number>().Int64Value() : 2000000;
+                codecCtx_->gop_size = fps;
+                codecCtx_->framerate = { fps, 1 };
+                codecCtx_->max_b_frames = 0;
+                codecCtx_->pix_fmt = AV_PIX_FMT_YUV420P;
+
+                configureEncoderOptions(codec_->name, latencyMode);
+
+                ret = avcodec_open2(codecCtx_, codec_, nullptr);
+                if (ret < 0) {
+                    av_strerror(ret, errBuf, sizeof(errBuf));
+                    avcodec_free_context(&codecCtx_);
+                    Napi::Error::New(env, std::string("Failed to open codec: ") + errBuf).ThrowAsJavaScriptException();
+                    return;
+                }
+            } else {
+                Napi::Error::New(env, std::string("Failed to open codec: ") + errBuf).ThrowAsJavaScriptException();
+                return;
+            }
+        } else {
+            Napi::Error::New(env, std::string("Failed to open codec: ") + errBuf).ThrowAsJavaScriptException();
+            return;
+        }
     }
 
     configured_ = true;
@@ -187,9 +323,15 @@ void VideoEncoderNative::Encode(const Napi::CallbackInfo& info) {
     int64_t timestamp = info[1].As<Napi::Number>().Int64Value();
     bool forceKeyframe = info[2].As<Napi::Boolean>().Value();
 
-    // Clone and convert frame to YUV420P if needed
+    // Determine target pixel format
+    AVPixelFormat targetFormat = codecCtx_->pix_fmt;
+    if (targetFormat == AV_PIX_FMT_VAAPI || targetFormat == AV_PIX_FMT_NONE) {
+        targetFormat = AV_PIX_FMT_YUV420P;
+    }
+
+    // Clone and convert frame
     AVFrame* frame = av_frame_alloc();
-    frame->format = AV_PIX_FMT_YUV420P;
+    frame->format = targetFormat;
     frame->width = width_;
     frame->height = height_;
     frame->pts = timestamp;
@@ -204,14 +346,14 @@ void VideoEncoderNative::Encode(const Napi::CallbackInfo& info) {
     }
 
     // Convert pixel format if needed
-    if (srcFrame->format != AV_PIX_FMT_YUV420P ||
+    if (srcFrame->format != targetFormat ||
         srcFrame->width != width_ ||
         srcFrame->height != height_) {
 
         if (!swsCtx_) {
             swsCtx_ = sws_getContext(
                 srcFrame->width, srcFrame->height, (AVPixelFormat)srcFrame->format,
-                width_, height_, AV_PIX_FMT_YUV420P,
+                width_, height_, targetFormat,
                 SWS_BILINEAR, nullptr, nullptr, nullptr
             );
 
@@ -321,6 +463,16 @@ void VideoEncoderNative::Close(const Napi::CallbackInfo& info) {
     if (swsCtx_) {
         sws_freeContext(swsCtx_);
         swsCtx_ = nullptr;
+    }
+
+    if (hwFramesCtx_) {
+        av_buffer_unref(&hwFramesCtx_);
+        hwFramesCtx_ = nullptr;
+    }
+
+    if (hwDeviceCtx_) {
+        av_buffer_unref(&hwDeviceCtx_);
+        hwDeviceCtx_ = nullptr;
     }
 
     if (codecCtx_) {

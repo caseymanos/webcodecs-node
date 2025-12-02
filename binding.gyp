@@ -8,7 +8,8 @@
         "native/audio.cpp",
         "native/encoder.cpp",
         "native/decoder.cpp",
-        "native/util.cpp"
+        "native/util.cpp",
+        "native/hw_accel.cpp"
       ],
       "include_dirs": [
         "<!@(node -p \"require('node-addon-api').include\")",
@@ -23,6 +24,7 @@
       "defines": ["NAPI_DISABLE_CPP_EXCEPTIONS"],
       "conditions": [
         ["OS=='mac'", {
+          "defines": ["__APPLE__"],
           "xcode_settings": {
             "GCC_ENABLE_CPP_EXCEPTIONS": "YES",
             "CLANG_CXX_LIBRARY": "libc++",
@@ -32,11 +34,16 @@
               "<!@(pkg-config --cflags libavcodec libavutil libswscale libswresample)"
             ],
             "OTHER_LDFLAGS": [
-              "<!@(pkg-config --libs libavcodec libavutil libswscale libswresample)"
+              "<!@(pkg-config --libs libavcodec libavutil libswscale libswresample)",
+              "-framework VideoToolbox",
+              "-framework CoreMedia",
+              "-framework CoreVideo",
+              "-framework CoreFoundation"
             ]
           }
         }],
         ["OS=='linux'", {
+          "defines": ["__linux__"],
           "cflags": [
             "-std=c++17",
             "<!@(pkg-config --cflags libavcodec libavutil libswscale libswresample)"
@@ -46,6 +53,7 @@
           ]
         }],
         ["OS=='win'", {
+          "defines": ["_WIN32"],
           "msvs_settings": {
             "VCCLCompilerTool": {
               "ExceptionHandling": 1,

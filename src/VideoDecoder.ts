@@ -50,6 +50,7 @@ export class VideoDecoder {
   private _errorCallback: (error: DOMException) => void;
   private _decodeQueueSize: number = 0;
   private _config: VideoDecoderConfig | null = null;
+  private _listeners: Map<string, Set<() => void>> = new Map();
 
   static async isConfigSupported(config: VideoDecoderConfig): Promise<VideoDecoderSupport> {
     const supported = isVideoCodecSupported(config.codec);
@@ -81,6 +82,55 @@ export class VideoDecoder {
 
   get decodeQueueSize(): number {
     return this._decodeQueueSize;
+  }
+
+  /**
+   * Minimal EventTarget-style API for 'dequeue' events.
+   * Enables compatibility with MediaBunny and browser WebCodecs code.
+   */
+  addEventListener(type: string, listener: () => void, options?: { once?: boolean }): void {
+    if (typeof listener !== 'function') return;
+
+    const once = !!(options && (options as any).once);
+    const wrapper = once
+      ? () => {
+          this.removeEventListener(type, wrapper);
+          listener();
+        }
+      : listener;
+
+    let set = this._listeners.get(type);
+    if (!set) {
+      set = new Set();
+      this._listeners.set(type, set);
+    }
+    set.add(wrapper);
+  }
+
+  removeEventListener(type: string, listener: () => void): void {
+    const set = this._listeners.get(type);
+    if (!set) return;
+
+    if (set.has(listener)) {
+      set.delete(listener);
+    }
+
+    if (set.size === 0) {
+      this._listeners.delete(type);
+    }
+  }
+
+  private _dispatchEvent(type: string): void {
+    const set = this._listeners.get(type);
+    if (!set) return;
+
+    for (const listener of Array.from(set)) {
+      try {
+        listener();
+      } catch {
+        // Swallow listener errors
+      }
+    }
   }
 
   configure(config: VideoDecoderConfig): void {
@@ -190,6 +240,7 @@ export class VideoDecoder {
 
   private _onFrame(nativeFrame: any, timestamp: number, duration: number): void {
     this._decodeQueueSize = Math.max(0, this._decodeQueueSize - 1);
+    this._dispatchEvent('dequeue');
 
     try {
       // Get frame info from native

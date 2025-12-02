@@ -7,9 +7,11 @@ Native WebCodecs API implementation for Node.js, using FFmpeg for encoding and d
 ## Features
 
 - **W3C WebCodecs API compatible** - Same API as the browser WebCodecs
+- **Hardware acceleration** - VideoToolbox (macOS), NVENC (NVIDIA), QSV (Intel), VAAPI (Linux)
 - **Video codecs**: H.264/AVC, H.265/HEVC, VP8, VP9, AV1
 - **Audio codecs**: AAC, Opus, FLAC, MP3
 - **High performance** - Native C++ bindings with FFmpeg
+- **Backpressure support** - `encodeQueueSize`, `decodeQueueSize`, and `dequeue` events
 - **TypeScript support** - Full type definitions included
 
 ## Requirements
@@ -143,13 +145,36 @@ encoder.close();
 
 ### Video Codecs
 
-| Codec String | Description | Encoder | Decoder |
-|--------------|-------------|---------|---------|
-| `avc1.PPCCLL` | H.264/AVC | libx264 | h264 |
-| `hvc1`, `hev1` | H.265/HEVC | libx265 | hevc |
-| `vp8` | VP8 | libvpx | vp8 |
-| `vp9`, `vp09.PP.LL.DD` | VP9 | libvpx-vp9 | vp9 |
-| `av01` | AV1 | libaom-av1 | libdav1d |
+| Codec String | Description | SW Encoder | HW Encoder |
+|--------------|-------------|------------|------------|
+| `avc1.PPCCLL` | H.264/AVC | libx264 | VideoToolbox, NVENC, QSV |
+| `hvc1`, `hev1` | H.265/HEVC | libx265 | VideoToolbox, NVENC, QSV |
+| `vp8` | VP8 | libvpx | - |
+| `vp9`, `vp09.PP.LL.DD` | VP9 | libvpx-vp9 | VAAPI, QSV |
+| `av01` | AV1 | libsvtav1 | NVENC (RTX 40+), QSV |
+
+## Hardware Acceleration
+
+Hardware encoders are automatically selected when available. You can control this with the `hardwareAcceleration` option:
+
+```javascript
+encoder.configure({
+  codec: 'avc1.42E01E',
+  width: 1920,
+  height: 1080,
+  bitrate: 5_000_000,
+  hardwareAcceleration: 'prefer-hardware',  // 'no-preference' | 'prefer-hardware' | 'prefer-software'
+});
+```
+
+### Supported Hardware Accelerators
+
+| Platform | Accelerator | H.264 | HEVC | VP9 | AV1 |
+|----------|-------------|-------|------|-----|-----|
+| macOS | VideoToolbox | Encode/Decode | Encode/Decode | - | - |
+| Windows/Linux | NVIDIA NVENC | Encode | Encode | - | Encode (RTX 40+) |
+| Windows/Linux | Intel QuickSync | Encode/Decode | Encode/Decode | Encode | Encode |
+| Linux | VA-API | Encode/Decode | Encode/Decode | Encode | Encode |
 
 ### Audio Codecs
 

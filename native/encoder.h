@@ -2,11 +2,13 @@
 #define ENCODER_H
 
 #include <napi.h>
+#include "hw_accel.h"
 
 extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavutil/frame.h>
 #include <libavutil/opt.h>
+#include <libavutil/hwcontext.h>
 #include <libswscale/swscale.h>
 }
 
@@ -27,10 +29,17 @@ private:
 
     void EmitChunk(Napi::Env env, AVPacket* packet, bool isKeyframe);
     void EmitError(Napi::Env env, const std::string& message);
+    void configureEncoderOptions(const std::string& encoderName, const std::string& latencyMode);
 
     AVCodecContext* codecCtx_;
     const AVCodec* codec_;
     SwsContext* swsCtx_;
+
+    // Hardware acceleration
+    HWAccel::Type hwType_;
+    AVBufferRef* hwDeviceCtx_;
+    AVBufferRef* hwFramesCtx_;
+    AVPixelFormat hwInputFormat_;
 
     Napi::FunctionReference outputCallback_;
     Napi::FunctionReference errorCallback_;

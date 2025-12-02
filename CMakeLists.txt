@@ -29,6 +29,7 @@ set(SOURCE_FILES
     native/frame.cpp
     native/audio.cpp
     native/util.cpp
+    native/hw_accel.cpp
 )
 
 # Build the addon
