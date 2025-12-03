@@ -1,23 +1,9 @@
 /**
  * Integration tests for VideoEncoder/VideoDecoder
  * Run with: node test/integration/encode-decode.test.js
- *
- * NOTE: Integration tests are skipped in CI due to async flush() timing issues
- * in containerized environments. Unit tests validate API correctness.
  */
 
 const { VideoEncoder, VideoDecoder, VideoFrame, EncodedVideoChunk } = require('../../dist/index.js');
-
-// Skip in CI - async encoder/decoder flush can hang in containerized environments
-const isCI = process.env.CI === 'true';
-
-if (isCI) {
-  console.log('WebCodecs-Node Integration Tests');
-  console.log('================================');
-  console.log('\nSKIPPED: Integration tests skipped in CI');
-  console.log('Unit tests validate API correctness. Integration tests run locally.\n');
-  process.exit(0);
-}
 
 async function testEncodeSingleFrame() {
   console.log('\n=== Test: Encode Single Frame ===');

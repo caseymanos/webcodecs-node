@@ -687,7 +687,9 @@ void VideoEncoderAsync::ProcessFlush() {
         result->isFlushComplete = false;
         result->hasExtradata = false;
 
-        tsfnOutput_.BlockingCall(result, [](Napi::Env env, Napi::Function fn, EncodeResult* res) {
+        // Use NonBlockingCall to prevent deadlock in resource-constrained environments
+        // (CI, serverless, containers) where the JS event loop may be starved
+        tsfnOutput_.NonBlockingCall(result, [](Napi::Env env, Napi::Function fn, EncodeResult* res) {
             Napi::Buffer<uint8_t> buffer = Napi::Buffer<uint8_t>::Copy(
                 env, res->data.data(), res->data.size());
 
@@ -707,9 +709,9 @@ void VideoEncoderAsync::ProcessFlush() {
     }
     av_packet_free(&packet);
 
-    // Signal flush complete
+    // Signal flush complete using NonBlockingCall to prevent deadlock
     if (tsfnFlush_) {
-        tsfnFlush_.BlockingCall([](Napi::Env env, Napi::Function fn) {
+        tsfnFlush_.NonBlockingCall([](Napi::Env env, Napi::Function fn) {
             fn.Call({ env.Null() });
         });
     }

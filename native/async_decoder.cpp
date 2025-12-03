@@ -298,7 +298,9 @@ void VideoDecoderAsync::ProcessFlush() {
         result->isError = false;
         result->isFlushComplete = false;
 
-        tsfnOutput_.BlockingCall(result, [](Napi::Env env, Napi::Function fn, DecodeResult* res) {
+        // Use NonBlockingCall to prevent deadlock in resource-constrained environments
+        // (CI, serverless, containers) where the JS event loop may be starved
+        tsfnOutput_.NonBlockingCall(result, [](Napi::Env env, Napi::Function fn, DecodeResult* res) {
             Napi::Object nativeFrame = VideoFrameNative::NewInstance(env, res->frame);
 
             fn.Call({
@@ -314,9 +316,9 @@ void VideoDecoderAsync::ProcessFlush() {
     }
     av_frame_free(&frame);
 
-    // Signal flush complete
+    // Signal flush complete using NonBlockingCall to prevent deadlock
     if (tsfnFlush_) {
-        tsfnFlush_.BlockingCall([](Napi::Env env, Napi::Function fn) {
+        tsfnFlush_.NonBlockingCall([](Napi::Env env, Napi::Function fn) {
             fn.Call({ env.Null() });
         });
     }
