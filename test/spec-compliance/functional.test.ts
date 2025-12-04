@@ -1920,3 +1920,172 @@ describe('Codec-Specific Encode/Decode Round-Trip Tests', () => {
     expect(result).toBeDefined();
   });
 });
+
+describe('EncodedVideoChunk Detailed Tests', () => {
+  it('should copyTo with correct data', () => {
+    if (!isWebCodecsAvailable()) {
+      expect.fail('WebCodecs API not available');
+    }
+
+    const originalData = new Uint8Array([0x00, 0x00, 0x00, 0x01, 0x67, 0x42, 0x00, 0x1e]);
+    const chunk = new EncodedVideoChunk({
+      type: 'key',
+      timestamp: 0,
+      data: originalData,
+    });
+
+    expect(chunk.byteLength).toBe(8);
+
+    const buffer = new Uint8Array(chunk.byteLength);
+    chunk.copyTo(buffer);
+
+    expect(buffer).toEqual(originalData);
+  });
+
+  it('should report correct duration when provided', () => {
+    if (!isWebCodecsAvailable()) {
+      expect.fail('WebCodecs API not available');
+    }
+
+    const chunk = new EncodedVideoChunk({
+      type: 'key',
+      timestamp: 0,
+      duration: 33333,
+      data: new Uint8Array([0, 0, 0, 1]),
+    });
+
+    expect(chunk.duration).toBe(33333);
+  });
+
+  it('should handle delta frames correctly', () => {
+    if (!isWebCodecsAvailable()) {
+      expect.fail('WebCodecs API not available');
+    }
+
+    const keyChunk = new EncodedVideoChunk({
+      type: 'key',
+      timestamp: 0,
+      data: new Uint8Array([0, 0, 0, 1, 0x67]),
+    });
+
+    const deltaChunk = new EncodedVideoChunk({
+      type: 'delta',
+      timestamp: 33333,
+      data: new Uint8Array([0, 0, 0, 1, 0x41]),
+    });
+
+    expect(keyChunk.type).toBe('key');
+    expect(deltaChunk.type).toBe('delta');
+  });
+
+  it('should handle large data buffers', () => {
+    if (!isWebCodecsAvailable()) {
+      expect.fail('WebCodecs API not available');
+    }
+
+    // Simulate a larger encoded frame
+    const largeData = new Uint8Array(100000);
+    for (let i = 0; i < largeData.length; i++) {
+      largeData[i] = i % 256;
+    }
+
+    const chunk = new EncodedVideoChunk({
+      type: 'key',
+      timestamp: 0,
+      data: largeData,
+    });
+
+    expect(chunk.byteLength).toBe(100000);
+
+    const buffer = new Uint8Array(chunk.byteLength);
+    chunk.copyTo(buffer);
+    expect(buffer[0]).toBe(0);
+    expect(buffer[255]).toBe(255);
+  });
+});
+
+describe('EncodedAudioChunk Detailed Tests', () => {
+  it('should copyTo with correct data', () => {
+    if (!isWebCodecsAvailable()) {
+      expect.fail('WebCodecs API not available');
+    }
+
+    const originalData = new Uint8Array([0xff, 0xf1, 0x50, 0x80, 0x00, 0x1f, 0xfc]);
+    const chunk = new EncodedAudioChunk({
+      type: 'key',
+      timestamp: 0,
+      data: originalData,
+    });
+
+    expect(chunk.byteLength).toBe(7);
+
+    const buffer = new Uint8Array(chunk.byteLength);
+    chunk.copyTo(buffer);
+
+    expect(buffer).toEqual(originalData);
+  });
+
+  it('should report correct duration when provided', () => {
+    if (!isWebCodecsAvailable()) {
+      expect.fail('WebCodecs API not available');
+    }
+
+    const chunk = new EncodedAudioChunk({
+      type: 'key',
+      timestamp: 0,
+      duration: 20000, // 20ms
+      data: new Uint8Array([0xff, 0xf1, 0x50, 0x80]),
+    });
+
+    expect(chunk.duration).toBe(20000);
+  });
+});
+
+describe('ImageDecoder Functional Tests', () => {
+  it('should report PNG as supported', async () => {
+    if (!isWebCodecsAvailable()) {
+      expect.fail('WebCodecs API not available');
+    }
+
+    const supported = await ImageDecoder.isTypeSupported('image/png');
+    expect(supported).toBe(true);
+  });
+
+  it('should report JPEG as supported', async () => {
+    if (!isWebCodecsAvailable()) {
+      expect.fail('WebCodecs API not available');
+    }
+
+    const supported = await ImageDecoder.isTypeSupported('image/jpeg');
+    expect(supported).toBe(true);
+  });
+
+  it('should report WebP support status', async () => {
+    if (!isWebCodecsAvailable()) {
+      expect.fail('WebCodecs API not available');
+    }
+
+    const supported = await ImageDecoder.isTypeSupported('image/webp');
+    // WebP may or may not be supported, just check the API works
+    expect(typeof supported).toBe('boolean');
+  });
+
+  it('should report GIF support status', async () => {
+    if (!isWebCodecsAvailable()) {
+      expect.fail('WebCodecs API not available');
+    }
+
+    const supported = await ImageDecoder.isTypeSupported('image/gif');
+    // GIF may or may not be supported
+    expect(typeof supported).toBe('boolean');
+  });
+
+  it('should reject unsupported types gracefully', async () => {
+    if (!isWebCodecsAvailable()) {
+      expect.fail('WebCodecs API not available');
+    }
+
+    const supported = await ImageDecoder.isTypeSupported('image/not-a-real-format');
+    expect(supported).toBe(false);
+  });
+});
