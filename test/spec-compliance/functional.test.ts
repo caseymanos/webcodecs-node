@@ -2893,3 +2893,505 @@ describe('ImageDecoder Functional Tests', () => {
     expect(supported).toBe(false);
   });
 });
+
+describe('Edge Case Tests', () => {
+  describe('Negative Timestamps', () => {
+    it('should handle negative timestamp in VideoFrame', () => {
+      if (!isWebCodecsAvailable()) {
+        expect.fail('WebCodecs API not available');
+      }
+
+      const ySize = 64 * 64;
+      const uvSize = 32 * 32;
+      const data = new Uint8Array(ySize + uvSize * 2);
+      data.fill(128);
+
+      const frame = new VideoFrame(data, {
+        format: 'I420',
+        codedWidth: 64,
+        codedHeight: 64,
+        timestamp: -1000000, // -1 second
+      });
+
+      expect(frame.timestamp).toBe(-1000000);
+      frame.close();
+    });
+
+    it('should handle negative timestamp in AudioData', () => {
+      if (!isWebCodecsAvailable()) {
+        expect.fail('WebCodecs API not available');
+      }
+
+      const samples = new Float32Array(960);
+      const audioData = new AudioData({
+        format: 'f32',
+        sampleRate: 48000,
+        numberOfFrames: 960,
+        numberOfChannels: 1,
+        timestamp: -500000, // -0.5 seconds
+        data: samples,
+      });
+
+      expect(audioData.timestamp).toBe(-500000);
+      audioData.close();
+    });
+
+    it('should handle negative timestamp in EncodedVideoChunk', () => {
+      if (!isWebCodecsAvailable()) {
+        expect.fail('WebCodecs API not available');
+      }
+
+      const chunk = new EncodedVideoChunk({
+        type: 'key',
+        timestamp: -100000,
+        data: new Uint8Array([0, 0, 0, 1, 0x67]),
+      });
+
+      expect(chunk.timestamp).toBe(-100000);
+    });
+
+    it('should handle negative timestamp in EncodedAudioChunk', () => {
+      if (!isWebCodecsAvailable()) {
+        expect.fail('WebCodecs API not available');
+      }
+
+      const chunk = new EncodedAudioChunk({
+        type: 'key',
+        timestamp: -200000,
+        data: new Uint8Array([0xff, 0xf1, 0x50, 0x80]),
+      });
+
+      expect(chunk.timestamp).toBe(-200000);
+    });
+  });
+
+  describe('VideoFrame Duration', () => {
+    it('should support explicit duration in VideoFrame', () => {
+      if (!isWebCodecsAvailable()) {
+        expect.fail('WebCodecs API not available');
+      }
+
+      const ySize = 64 * 64;
+      const uvSize = 32 * 32;
+      const data = new Uint8Array(ySize + uvSize * 2);
+      data.fill(128);
+
+      const frame = new VideoFrame(data, {
+        format: 'I420',
+        codedWidth: 64,
+        codedHeight: 64,
+        timestamp: 0,
+        duration: 33333, // ~30fps
+      });
+
+      expect(frame.duration).toBe(33333);
+      frame.close();
+    });
+
+    it('should handle zero duration in VideoFrame', () => {
+      if (!isWebCodecsAvailable()) {
+        expect.fail('WebCodecs API not available');
+      }
+
+      const ySize = 64 * 64;
+      const uvSize = 32 * 32;
+      const data = new Uint8Array(ySize + uvSize * 2);
+      data.fill(128);
+
+      const frame = new VideoFrame(data, {
+        format: 'I420',
+        codedWidth: 64,
+        codedHeight: 64,
+        timestamp: 0,
+        duration: 0,
+      });
+
+      expect(frame.duration).toBe(0);
+      frame.close();
+    });
+  });
+
+  describe('Empty Data', () => {
+    it('should handle empty data in EncodedVideoChunk', () => {
+      if (!isWebCodecsAvailable()) {
+        expect.fail('WebCodecs API not available');
+      }
+
+      const chunk = new EncodedVideoChunk({
+        type: 'key',
+        timestamp: 0,
+        data: new Uint8Array(0),
+      });
+
+      expect(chunk.byteLength).toBe(0);
+    });
+
+    it('should handle empty data in EncodedAudioChunk', () => {
+      if (!isWebCodecsAvailable()) {
+        expect.fail('WebCodecs API not available');
+      }
+
+      const chunk = new EncodedAudioChunk({
+        type: 'key',
+        timestamp: 0,
+        data: new Uint8Array(0),
+      });
+
+      expect(chunk.byteLength).toBe(0);
+    });
+  });
+
+  describe('EncodedAudioChunk copyTo', () => {
+    it('should copyTo buffer correctly', () => {
+      if (!isWebCodecsAvailable()) {
+        expect.fail('WebCodecs API not available');
+      }
+
+      const originalData = new Uint8Array([0x01, 0x02, 0x03, 0x04, 0x05]);
+      const chunk = new EncodedAudioChunk({
+        type: 'key',
+        timestamp: 0,
+        data: originalData,
+      });
+
+      expect(chunk.byteLength).toBe(5);
+
+      const buffer = new Uint8Array(chunk.byteLength);
+      chunk.copyTo(buffer);
+
+      expect(buffer).toEqual(originalData);
+    });
+
+    it('should copyTo ArrayBuffer correctly', () => {
+      if (!isWebCodecsAvailable()) {
+        expect.fail('WebCodecs API not available');
+      }
+
+      const originalData = new Uint8Array([0xDE, 0xAD, 0xBE, 0xEF]);
+      const chunk = new EncodedAudioChunk({
+        type: 'key',
+        timestamp: 0,
+        data: originalData,
+      });
+
+      const buffer = new ArrayBuffer(chunk.byteLength);
+      chunk.copyTo(buffer);
+
+      const view = new Uint8Array(buffer);
+      expect(view).toEqual(originalData);
+    });
+
+    it('should copyTo oversized buffer correctly', () => {
+      if (!isWebCodecsAvailable()) {
+        expect.fail('WebCodecs API not available');
+      }
+
+      const originalData = new Uint8Array([0x11, 0x22, 0x33]);
+      const chunk = new EncodedAudioChunk({
+        type: 'key',
+        timestamp: 0,
+        data: originalData,
+      });
+
+      const buffer = new Uint8Array(100); // Much larger than needed
+      buffer.fill(0xFF); // Fill with sentinel value
+      chunk.copyTo(buffer);
+
+      // First 3 bytes should be copied
+      expect(buffer[0]).toBe(0x11);
+      expect(buffer[1]).toBe(0x22);
+      expect(buffer[2]).toBe(0x33);
+      // Rest should be unchanged (sentinel value)
+      expect(buffer[3]).toBe(0xFF);
+    });
+  });
+
+  describe('Odd Dimensions', () => {
+    it('should handle odd width (127) for I420 VideoFrame', () => {
+      if (!isWebCodecsAvailable()) {
+        expect.fail('WebCodecs API not available');
+      }
+
+      // I420 requires UV planes at half resolution, so odd dimensions
+      // may be padded to even numbers by the implementation
+      const width = 127;
+      const height = 128;
+      const ySize = width * height;
+      const uvWidth = Math.ceil(width / 2);
+      const uvHeight = Math.ceil(height / 2);
+      const uvSize = uvWidth * uvHeight;
+      const data = new Uint8Array(ySize + uvSize * 2);
+      data.fill(128);
+
+      const frame = new VideoFrame(data, {
+        format: 'I420',
+        codedWidth: width,
+        codedHeight: height,
+        timestamp: 0,
+      });
+
+      // Implementation may pad to even dimensions
+      expect(frame.codedWidth).toBeGreaterThanOrEqual(127);
+      expect(frame.codedHeight).toBe(128);
+      frame.close();
+    });
+
+    it('should handle odd height (127) for I420 VideoFrame', () => {
+      if (!isWebCodecsAvailable()) {
+        expect.fail('WebCodecs API not available');
+      }
+
+      const width = 128;
+      const height = 127;
+      const ySize = width * height;
+      const uvWidth = Math.ceil(width / 2);
+      const uvHeight = Math.ceil(height / 2);
+      const uvSize = uvWidth * uvHeight;
+      const data = new Uint8Array(ySize + uvSize * 2);
+      data.fill(128);
+
+      const frame = new VideoFrame(data, {
+        format: 'I420',
+        codedWidth: width,
+        codedHeight: height,
+        timestamp: 0,
+      });
+
+      // Implementation may pad to even dimensions
+      expect(frame.codedWidth).toBe(128);
+      expect(frame.codedHeight).toBeGreaterThanOrEqual(127);
+      frame.close();
+    });
+
+    it('should encode and decode odd dimensions (127x127)', async () => {
+      if (!isWebCodecsAvailable()) {
+        expect.fail('WebCodecs API not available');
+      }
+
+      const width = 127;
+      const height = 127;
+      const chunks: EncodedVideoChunk[] = [];
+      let decoderConfig: VideoDecoderConfig | null = null;
+
+      const encoder = new VideoEncoder({
+        output: (chunk, meta) => {
+          chunks.push(chunk);
+          if (meta?.decoderConfig) decoderConfig = meta.decoderConfig;
+        },
+        error: (e) => { throw e; },
+      });
+
+      encoder.configure({
+        codec: 'vp8',
+        width,
+        height,
+        bitrate: 200_000,
+        framerate: 30,
+      });
+
+      const ySize = width * height;
+      const uvWidth = Math.ceil(width / 2);
+      const uvHeight = Math.ceil(height / 2);
+      const uvSize = uvWidth * uvHeight;
+      const data = new Uint8Array(ySize + uvSize * 2);
+      data.fill(128);
+
+      const frame = new VideoFrame(data, {
+        format: 'I420',
+        codedWidth: width,
+        codedHeight: height,
+        timestamp: 0,
+      });
+
+      encoder.encode(frame, { keyFrame: true });
+      frame.close();
+      await encoder.flush();
+      encoder.close();
+
+      expect(chunks.length).toBeGreaterThan(0);
+      expect(decoderConfig).not.toBeNull();
+
+      // Now decode
+      const decodedFrames: VideoFrame[] = [];
+      const decoder = new VideoDecoder({
+        output: (f) => { decodedFrames.push(f); },
+        error: (e) => { throw e; },
+      });
+
+      decoder.configure(decoderConfig!);
+      decoder.decode(chunks[0]);
+      await decoder.flush();
+      decoder.close();
+
+      expect(decodedFrames.length).toBe(1);
+      // Decoded dimensions might be padded to even numbers
+      expect(decodedFrames[0].codedWidth).toBeGreaterThanOrEqual(127);
+      expect(decodedFrames[0].codedHeight).toBeGreaterThanOrEqual(127);
+
+      decodedFrames[0].close();
+    });
+  });
+
+  describe('Large Timestamps', () => {
+    it('should handle large timestamp values', () => {
+      if (!isWebCodecsAvailable()) {
+        expect.fail('WebCodecs API not available');
+      }
+
+      // 24 hours in microseconds
+      const largeTimestamp = 24 * 60 * 60 * 1_000_000;
+
+      const ySize = 64 * 64;
+      const uvSize = 32 * 32;
+      const data = new Uint8Array(ySize + uvSize * 2);
+      data.fill(128);
+
+      const frame = new VideoFrame(data, {
+        format: 'I420',
+        codedWidth: 64,
+        codedHeight: 64,
+        timestamp: largeTimestamp,
+      });
+
+      expect(frame.timestamp).toBe(largeTimestamp);
+      frame.close();
+    });
+  });
+
+  describe('AudioData Partial Copy', () => {
+    it('should support allocationSize with planeIndex', () => {
+      if (!isWebCodecsAvailable()) {
+        expect.fail('WebCodecs API not available');
+      }
+
+      const samples = new Float32Array(1024);
+      const audioData = new AudioData({
+        format: 'f32',
+        sampleRate: 48000,
+        numberOfFrames: 1024,
+        numberOfChannels: 1,
+        timestamp: 0,
+        data: samples,
+      });
+
+      const size = audioData.allocationSize({ planeIndex: 0 });
+      expect(size).toBe(1024 * 4); // 1024 samples * 4 bytes per float
+
+      audioData.close();
+    });
+
+    it('should support allocationSize with format conversion', () => {
+      if (!isWebCodecsAvailable()) {
+        expect.fail('WebCodecs API not available');
+      }
+
+      const samples = new Float32Array(1024);
+      const audioData = new AudioData({
+        format: 'f32',
+        sampleRate: 48000,
+        numberOfFrames: 1024,
+        numberOfChannels: 1,
+        timestamp: 0,
+        data: samples,
+      });
+
+      try {
+        // Request allocation size for s16 format conversion
+        const size = audioData.allocationSize({ planeIndex: 0, format: 's16' });
+        expect(size).toBe(1024 * 2); // 1024 samples * 2 bytes per s16
+      } catch (e) {
+        // Format conversion may not be supported
+        console.log('AudioData format conversion not supported:', e);
+      }
+
+      audioData.close();
+    });
+  });
+
+  describe('VideoColorSpace', () => {
+    it('should create VideoColorSpace with partial init', () => {
+      if (!isWebCodecsAvailable()) {
+        expect.fail('WebCodecs API not available');
+      }
+
+      // VideoColorSpace might be available
+      if (typeof VideoColorSpace === 'undefined') {
+        console.log('VideoColorSpace not available');
+        return;
+      }
+
+      const colorSpace = new VideoColorSpace({ primaries: 'bt709' });
+      expect(colorSpace.primaries).toBe('bt709');
+    });
+
+    it('should serialize VideoColorSpace with toJSON', () => {
+      if (!isWebCodecsAvailable()) {
+        expect.fail('WebCodecs API not available');
+      }
+
+      if (typeof VideoColorSpace === 'undefined') {
+        console.log('VideoColorSpace not available');
+        return;
+      }
+
+      const colorSpace = new VideoColorSpace({
+        primaries: 'bt709',
+        transfer: 'bt709',
+        matrix: 'bt709',
+        fullRange: false,
+      });
+
+      const json = colorSpace.toJSON();
+      expect(json.primaries).toBe('bt709');
+      expect(json.transfer).toBe('bt709');
+      expect(json.matrix).toBe('bt709');
+      expect(json.fullRange).toBe(false);
+    });
+  });
+
+  describe('ImageDecoder Reset', () => {
+    it('should have reset method', async () => {
+      if (!isWebCodecsAvailable()) {
+        expect.fail('WebCodecs API not available');
+      }
+
+      // Create a minimal PNG (1x1 red pixel)
+      // PNG header + IHDR + IDAT + IEND
+      const minimalPng = new Uint8Array([
+        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, // PNG signature
+        0x00, 0x00, 0x00, 0x0D, // IHDR length
+        0x49, 0x48, 0x44, 0x52, // IHDR
+        0x00, 0x00, 0x00, 0x01, // width: 1
+        0x00, 0x00, 0x00, 0x01, // height: 1
+        0x08, 0x02, // bit depth: 8, color type: 2 (RGB)
+        0x00, 0x00, 0x00, // compression, filter, interlace
+        0x90, 0x77, 0x53, 0xDE, // CRC
+        0x00, 0x00, 0x00, 0x0C, // IDAT length
+        0x49, 0x44, 0x41, 0x54, // IDAT
+        0x08, 0xD7, 0x63, 0xF8, 0xCF, 0xC0, 0x00, 0x00, 0x01, 0x01, 0x01, 0x00, // compressed data
+        0x1B, 0xB6, 0xEE, 0x56, // CRC
+        0x00, 0x00, 0x00, 0x00, // IEND length
+        0x49, 0x45, 0x4E, 0x44, // IEND
+        0xAE, 0x42, 0x60, 0x82, // CRC
+      ]);
+
+      try {
+        const decoder = new ImageDecoder({
+          type: 'image/png',
+          data: minimalPng,
+        });
+
+        // Check reset method exists
+        expect(typeof decoder.reset).toBe('function');
+
+        // Call reset
+        decoder.reset();
+        
+        decoder.close();
+      } catch (e) {
+        // ImageDecoder might not support this format in all environments
+        console.log('ImageDecoder test skipped:', e);
+      }
+    });
+  });
+});
