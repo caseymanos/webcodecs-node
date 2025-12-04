@@ -1921,6 +1921,146 @@ describe('Codec-Specific Encode/Decode Round-Trip Tests', () => {
   });
 });
 
+describe('Metadata and DecoderConfig Tests', () => {
+  it('should provide decoderConfig metadata on first keyframe', async () => {
+    if (!isWebCodecsAvailable()) {
+      expect.fail('WebCodecs API not available');
+    }
+
+    const metadata: EncodedVideoChunkMetadata[] = [];
+    let config: VideoDecoderConfig | undefined;
+
+    const encoder = new VideoEncoder({
+      output: (_chunk, meta) => {
+        if (meta) {
+          metadata.push(meta);
+          if (meta.decoderConfig) config = meta.decoderConfig;
+        }
+      },
+      error: (e) => { throw e; },
+    });
+
+    encoder.configure({
+      codec: 'vp8',
+      width: 64,
+      height: 64,
+      bitrate: 100_000,
+      framerate: 30,
+    });
+
+    const frame = createI420VideoFrame(64, 64, 0);
+    encoder.encode(frame, { keyFrame: true });
+    frame.close();
+    await encoder.flush();
+    encoder.close();
+
+    expect(metadata.length).toBeGreaterThan(0);
+    expect(config).toBeDefined();
+    expect(config!.codec).toBe('vp8');
+    expect(config!.codedWidth).toBe(64);
+    expect(config!.codedHeight).toBe(64);
+  });
+
+  it('should provide audio decoderConfig metadata', async () => {
+    if (!isWebCodecsAvailable()) {
+      expect.fail('WebCodecs API not available');
+    }
+
+    let config: AudioDecoderConfig | undefined;
+
+    const encoder = new AudioEncoder({
+      output: (_chunk, meta) => {
+        if (meta?.decoderConfig) config = meta.decoderConfig;
+      },
+      error: (e) => { throw e; },
+    });
+
+    encoder.configure({
+      codec: 'opus',
+      sampleRate: 48000,
+      numberOfChannels: 2,
+      bitrate: 128000,
+    });
+
+    const samples = new Float32Array(960 * 2);
+    const audioData = new AudioData({
+      format: 'f32',
+      sampleRate: 48000,
+      numberOfFrames: 960,
+      numberOfChannels: 2,
+      timestamp: 0,
+      data: samples,
+    });
+
+    encoder.encode(audioData);
+    audioData.close();
+    await encoder.flush();
+    encoder.close();
+
+    expect(config).toBeDefined();
+    expect(config!.codec).toBe('opus');
+    expect(config!.sampleRate).toBe(48000);
+    expect(config!.numberOfChannels).toBe(2);
+  });
+
+  it('decoderConfig should be usable for decoder configuration', async () => {
+    if (!isWebCodecsAvailable()) {
+      expect.fail('WebCodecs API not available');
+    }
+
+    // Encode
+    let config: VideoDecoderConfig | undefined;
+    const chunks: EncodedVideoChunk[] = [];
+
+    const encoder = new VideoEncoder({
+      output: (chunk, meta) => {
+        chunks.push(chunk);
+        if (meta?.decoderConfig) config = meta.decoderConfig;
+      },
+      error: (e) => { throw e; },
+    });
+
+    encoder.configure({
+      codec: 'vp8',
+      width: 64,
+      height: 64,
+      bitrate: 100_000,
+      framerate: 30,
+    });
+
+    const frame = createI420VideoFrame(64, 64, 0);
+    encoder.encode(frame, { keyFrame: true });
+    frame.close();
+    await encoder.flush();
+    encoder.close();
+
+    // Decode using the config
+    expect(config).toBeDefined();
+    
+    const decodedFrames: VideoFrame[] = [];
+    const decoder = new VideoDecoder({
+      output: (f) => { decodedFrames.push(f); },
+      error: (e) => { throw e; },
+    });
+
+    // This should not throw - decoderConfig should be valid
+    decoder.configure(config!);
+    expect(decoder.state).toBe('configured');
+
+    for (const chunk of chunks) {
+      decoder.decode(chunk);
+    }
+    await decoder.flush();
+
+    expect(decodedFrames.length).toBeGreaterThan(0);
+
+    for (const f of decodedFrames) {
+      f.close();
+    }
+    decoder.close();
+  });
+});
+
 describe('EncodedVideoChunk Detailed Tests', () => {
   it('should copyTo with correct data', () => {
     if (!isWebCodecsAvailable()) {
