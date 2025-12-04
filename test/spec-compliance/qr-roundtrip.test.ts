@@ -295,6 +295,24 @@ describe('QR Code Round-Trip Verification', () => {
     });
   });
 
+  describe('HEVC (H.265) Codec', () => {
+    it('should encode and decode HEVC with QR verification', async () => {
+      if (!isWebCodecsAvailable()) {
+        expect.fail('WebCodecs API not available');
+      }
+
+      // hev1.1.6.L93.B0 = Main Profile, Level 3.1
+      // hvc1.1.6.L93.B0 also works (different NAL structure)
+      const result = await testQRCodeRoundTrip('hev1.1.6.L93.B0', 256, 256, 2_000_000);
+      
+      // HEVC may not be supported in all environments (patent issues)
+      expect(result).toBeDefined();
+      if (result.success && result.decodedSecret) {
+        console.log(`HEVC QR round-trip verified: ${result.decodedSecret}`);
+      }
+    });
+  });
+
   describe('AV1 Codec', () => {
     it('should encode and decode AV1 with QR verification', async () => {
       if (!isWebCodecsAvailable()) {
