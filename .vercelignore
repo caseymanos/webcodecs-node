@@ -1,0 +1,14 @@
+.beads/
+node_modules/
+.git/
+*.log
+.DS_Store
+test/
+examples/
+benchmark/
+native/
+build/
+prebuilds/
+*.md
+!docs/**/*.md
+!docs/**/*.mdx
