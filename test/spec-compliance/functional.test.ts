@@ -848,6 +848,165 @@ describe('Audio Decoding Functional Tests', () => {
   });
 });
 
+describe('Flush Behavior Tests', () => {
+  it('should flush encoder and produce all pending output', async () => {
+    if (!isWebCodecsAvailable()) {
+      expect.fail('WebCodecs API not available');
+    }
+
+    const chunks: EncodedVideoChunk[] = [];
+
+    const encoder = new VideoEncoder({
+      output: (chunk) => { chunks.push(chunk); },
+      error: (e) => { throw e; },
+    });
+
+    encoder.configure({
+      codec: 'vp8',
+      width: 64,
+      height: 64,
+      bitrate: 100_000,
+      framerate: 30,
+    });
+
+    // Encode multiple frames
+    for (let i = 0; i < 5; i++) {
+      const frame = createI420VideoFrame(64, 64, i * 33333, 100 + i * 20);
+      encoder.encode(frame, { keyFrame: i === 0 });
+      frame.close();
+    }
+
+    // Flush should wait for all output
+    await encoder.flush();
+
+    // After flush, all frames should be processed
+    expect(chunks.length).toBe(5);
+
+    encoder.close();
+  });
+
+  it('encoder state should be configured after flush', async () => {
+    if (!isWebCodecsAvailable()) {
+      expect.fail('WebCodecs API not available');
+    }
+
+    const encoder = new VideoEncoder({
+      output: () => {},
+      error: (e) => { throw e; },
+    });
+
+    encoder.configure({
+      codec: 'vp8',
+      width: 64,
+      height: 64,
+      bitrate: 100_000,
+      framerate: 30,
+    });
+
+    // Encode and flush
+    const frame = createI420VideoFrame(64, 64, 0);
+    encoder.encode(frame, { keyFrame: true });
+    frame.close();
+    await encoder.flush();
+
+    // State should still be configured after flush
+    expect(encoder.state).toBe('configured');
+
+    encoder.close();
+  });
+
+  it('should flush decoder and produce all pending output', async () => {
+    if (!isWebCodecsAvailable()) {
+      expect.fail('WebCodecs API not available');
+    }
+
+    // First encode some frames
+    const chunks: EncodedVideoChunk[] = [];
+    let decoderConfig: VideoDecoderConfig | null = null;
+
+    const encoder = new VideoEncoder({
+      output: (chunk, meta) => {
+        chunks.push(chunk);
+        if (meta?.decoderConfig) decoderConfig = meta.decoderConfig;
+      },
+      error: (e) => { throw e; },
+    });
+
+    encoder.configure({
+      codec: 'vp8',
+      width: 64,
+      height: 64,
+      bitrate: 100_000,
+      framerate: 30,
+    });
+
+    for (let i = 0; i < 3; i++) {
+      const frame = createI420VideoFrame(64, 64, i * 33333);
+      encoder.encode(frame, { keyFrame: i === 0 });
+      frame.close();
+    }
+    await encoder.flush();
+    encoder.close();
+
+    // Now decode
+    const decodedFrames: VideoFrame[] = [];
+
+    const decoder = new VideoDecoder({
+      output: (f) => { decodedFrames.push(f); },
+      error: (e) => { throw e; },
+    });
+
+    decoder.configure(decoderConfig!);
+
+    for (const chunk of chunks) {
+      decoder.decode(chunk);
+    }
+
+    // Flush should wait for all output
+    await decoder.flush();
+
+    expect(decodedFrames.length).toBe(3);
+
+    for (const f of decodedFrames) {
+      f.close();
+    }
+
+    decoder.close();
+  });
+
+  it('flush() should return a promise that resolves when complete', async () => {
+    if (!isWebCodecsAvailable()) {
+      expect.fail('WebCodecs API not available');
+    }
+
+    const encoder = new VideoEncoder({
+      output: () => {},
+      error: (e) => { throw e; },
+    });
+
+    encoder.configure({
+      codec: 'vp8',
+      width: 64,
+      height: 64,
+      bitrate: 100_000,
+      framerate: 30,
+    });
+
+    const frame = createI420VideoFrame(64, 64, 0);
+    encoder.encode(frame, { keyFrame: true });
+    frame.close();
+
+    const flushPromise = encoder.flush();
+
+    // flush() should return a Promise
+    expect(flushPromise).toBeInstanceOf(Promise);
+    
+    await flushPromise;
+
+    encoder.close();
+  });
+});
+
 describe('Queue Size Tracking', () => {
   it('should track encodeQueueSize during video encoding', async () => {
     if (!isWebCodecsAvailable()) {
