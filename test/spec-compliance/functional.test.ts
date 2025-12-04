@@ -447,6 +447,170 @@ describe('AudioData Functional Tests', () => {
   });
 });
 
+describe('Audio Decoding Functional Tests', () => {
+  let decoder: AudioDecoder | null = null;
+
+  afterEach(() => {
+    if (decoder && decoder.state !== 'closed') {
+      decoder.close();
+    }
+    decoder = null;
+  });
+
+  it('should decode encoded audio and produce AudioData with correct properties', async () => {
+    if (!isWebCodecsAvailable()) {
+      expect.fail('WebCodecs API not available');
+    }
+
+    // First encode
+    const chunks: EncodedAudioChunk[] = [];
+    let decoderConfig: AudioDecoderConfig | null = null;
+
+    const encoder = new AudioEncoder({
+      output: (chunk, meta) => {
+        chunks.push(chunk);
+        if (meta?.decoderConfig) decoderConfig = meta.decoderConfig;
+      },
+      error: (e) => { throw e; },
+    });
+
+    encoder.configure({
+      codec: 'opus',
+      sampleRate: 48000,
+      numberOfChannels: 2,
+      bitrate: 128000,
+    });
+
+    // Encode a single frame
+    const numberOfFrames = 960;
+    const samples = new Float32Array(numberOfFrames * 2);
+    for (let i = 0; i < numberOfFrames; i++) {
+      samples[i * 2] = Math.sin((2 * Math.PI * 440 * i) / 48000);
+      samples[i * 2 + 1] = Math.sin((2 * Math.PI * 880 * i) / 48000);
+    }
+
+    const audioData = new AudioData({
+      format: 'f32',
+      sampleRate: 48000,
+      numberOfFrames,
+      numberOfChannels: 2,
+      timestamp: 0,
+      data: samples,
+    });
+
+    encoder.encode(audioData);
+    audioData.close();
+    await encoder.flush();
+    encoder.close();
+
+    expect(chunks.length).toBeGreaterThan(0);
+    expect(decoderConfig).not.toBeNull();
+
+    // Now decode
+    const decodedAudio: AudioData[] = [];
+
+    decoder = new AudioDecoder({
+      output: (data) => { decodedAudio.push(data); },
+      error: (e) => { throw e; },
+    });
+
+    decoder.configure(decoderConfig!);
+
+    for (const chunk of chunks) {
+      decoder.decode(chunk);
+    }
+
+    await decoder.flush();
+
+    expect(decodedAudio.length).toBeGreaterThan(0);
+    expect(decodedAudio[0].sampleRate).toBe(48000);
+    expect(decodedAudio[0].numberOfChannels).toBe(2);
+    expect(decodedAudio[0].format).toBeTruthy();
+
+    for (const data of decodedAudio) {
+      data.close();
+    }
+  });
+
+  it('should preserve timestamps in audio decode round-trip', async () => {
+    if (!isWebCodecsAvailable()) {
+      expect.fail('WebCodecs API not available');
+    }
+
+    // Encode multiple frames
+    const chunks: EncodedAudioChunk[] = [];
+    let decoderConfig: AudioDecoderConfig | null = null;
+
+    const encoder = new AudioEncoder({
+      output: (chunk, meta) => {
+        chunks.push(chunk);
+        if (meta?.decoderConfig) decoderConfig = meta.decoderConfig;
+      },
+      error: (e) => { throw e; },
+    });
+
+    encoder.configure({
+      codec: 'opus',
+      sampleRate: 48000,
+      numberOfChannels: 1,
+      bitrate: 64000,
+    });
+
+    const frameSize = 960;
+    const timestamps = [0, 20000, 40000];
+
+    for (let i = 0; i < timestamps.length; i++) {
+      const samples = new Float32Array(frameSize);
+      for (let j = 0; j < frameSize; j++) {
+        samples[j] = Math.sin((2 * Math.PI * 440 * j) / 48000);
+      }
+
+      const audioData = new AudioData({
+        format: 'f32',
+        sampleRate: 48000,
+        numberOfFrames: frameSize,
+        numberOfChannels: 1,
+        timestamp: timestamps[i],
+        data: samples,
+      });
+
+      encoder.encode(audioData);
+      audioData.close();
+    }
+
+    await encoder.flush();
+    encoder.close();
+
+    // Decode
+    const decodedAudio: AudioData[] = [];
+
+    decoder = new AudioDecoder({
+      output: (data) => { decodedAudio.push(data); },
+      error: (e) => { throw e; },
+    });
+
+    decoder.configure(decoderConfig!);
+
+    for (const chunk of chunks) {
+      decoder.decode(chunk);
+    }
+
+    await decoder.flush();
+
+    // Opus may produce extra frames due to encoder priming
+    expect(decodedAudio.length).toBeGreaterThanOrEqual(timestamps.length);
+    
+    // Check that the first N decoded frames have matching timestamps
+    for (let i = 0; i < timestamps.length; i++) {
+      expect(decodedAudio[i].timestamp).toBe(timestamps[i]);
+    }
+
+    for (const data of decodedAudio) {
+      data.close();
+    }
+  });
+});
+
 describe('Queue Size Tracking', () => {
   it('should track encodeQueueSize during video encoding', async () => {
     if (!isWebCodecsAvailable()) {
