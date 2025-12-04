@@ -32,3 +32,9 @@ coverage/
 *.tmp
 *.temp
 examples/big_buck_bunny.mp4
+
+# Development/Planning files
+.claude/
+thoughts/
+IMPLEMENTATION_PLAN.md
+*PLAN*.md
