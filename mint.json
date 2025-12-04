@@ -34,8 +34,7 @@
       "pages": [
         "docs/introduction",
         "docs/getting-started/installation",
-        "docs/getting-started/quick-start",
-        "docs/getting-started/first-decode"
+        "docs/getting-started/quick-start"
       ]
     },
     {
@@ -60,42 +59,6 @@
         "docs/api-reference/EncodedAudioChunk",
         "docs/api-reference/VideoColorSpace",
         "docs/api-reference/types"
-      ]
-    },
-    {
-      "group": "Guides",
-      "pages": [
-        "docs/guides/hardware-acceleration",
-        "docs/guides/hdr-encoding",
-        "docs/guides/alpha-channels",
-        "docs/guides/worker-threads",
-        "docs/guides/backpressure"
-      ]
-    },
-    {
-      "group": "Cookbook",
-      "pages": [
-        "docs/cookbook/overview",
-        "docs/cookbook/transcode",
-        "docs/cookbook/watermark",
-        "docs/cookbook/thumbnails",
-        "docs/cookbook/webrtc-recording",
-        "docs/cookbook/video-validation"
-      ]
-    },
-    {
-      "group": "Examples",
-      "pages": [
-        "docs/examples/basic-encoding",
-        "docs/examples/hdr-encoding",
-        "docs/examples/alpha-video",
-        "docs/examples/real-world"
-      ]
-    },
-    {
-      "group": "Help",
-      "pages": [
-        "docs/troubleshooting/overview"
       ]
     }
   ],
