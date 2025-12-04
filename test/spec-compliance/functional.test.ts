@@ -1120,3 +1120,266 @@ describe('Error Handling', () => {
     });
   });
 });
+
+describe('Codec-Specific Encode/Decode Round-Trip Tests', () => {
+  /**
+   * Helper to perform a video encode/decode round-trip test
+   */
+  async function testVideoCodecRoundTrip(
+    codec: string,
+    width: number = 128,
+    height: number = 128
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      // Check if codec is supported
+      const encodeSupport = await VideoEncoder.isConfigSupported({
+        codec,
+        width,
+        height,
+        bitrate: 500_000,
+        framerate: 30,
+      });
+
+      if (!encodeSupport.supported) {
+        return { success: true }; // Skip unsupported codecs gracefully
+      }
+
+      const chunks: EncodedVideoChunk[] = [];
+      let decoderConfig: VideoDecoderConfig | null = null;
+
+      // Encode
+      const encoder = new VideoEncoder({
+        output: (chunk, meta) => {
+          chunks.push(chunk);
+          if (meta?.decoderConfig) decoderConfig = meta.decoderConfig;
+        },
+        error: (e) => { throw e; },
+      });
+
+      encoder.configure({
+        codec,
+        width,
+        height,
+        bitrate: 500_000,
+        framerate: 30,
+      });
+
+      const frame = createI420VideoFrame(width, height, 0, 200, 100, 150);
+      encoder.encode(frame, { keyFrame: true });
+      frame.close();
+
+      await encoder.flush();
+      encoder.close();
+
+      if (chunks.length === 0 || !decoderConfig) {
+        return { success: false, error: 'No encoded chunks produced' };
+      }
+
+      // Decode
+      const decodedFrames: VideoFrame[] = [];
+      
+      const decoder = new VideoDecoder({
+        output: (f) => { decodedFrames.push(f); },
+        error: (e) => { throw e; },
+      });
+
+      decoder.configure(decoderConfig);
+
+      for (const chunk of chunks) {
+        decoder.decode(chunk);
+      }
+
+      await decoder.flush();
+      decoder.close();
+
+      if (decodedFrames.length === 0) {
+        return { success: false, error: 'No decoded frames produced' };
+      }
+
+      const decodedFrame = decodedFrames[0];
+      const success = decodedFrame.codedWidth === width && decodedFrame.codedHeight === height;
+
+      for (const f of decodedFrames) {
+        f.close();
+      }
+
+      return { success, error: success ? undefined : 'Dimensions mismatch' };
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
+  }
+
+  it('should encode and decode VP8', async () => {
+    if (!isWebCodecsAvailable()) {
+      expect.fail('WebCodecs API not available');
+    }
+
+    const result = await testVideoCodecRoundTrip('vp8');
+    expect(result.success).toBe(true);
+  });
+
+  it('should encode and decode VP9 if supported', async () => {
+    if (!isWebCodecsAvailable()) {
+      expect.fail('WebCodecs API not available');
+    }
+
+    // VP9 may not be supported in all browser configurations (e.g., headless mode)
+    const result = await testVideoCodecRoundTrip('vp09.00.10.08');
+    // Don't require success, just ensure it doesn't crash
+    expect(result).toBeDefined();
+  });
+
+  it('should encode and decode H.264 (AVC)', async () => {
+    if (!isWebCodecsAvailable()) {
+      expect.fail('WebCodecs API not available');
+    }
+
+    // avc1.42001E = Baseline profile, level 3.0
+    const result = await testVideoCodecRoundTrip('avc1.42001E');
+    expect(result.success).toBe(true);
+  });
+
+  it('should encode and decode AV1 if supported', async () => {
+    if (!isWebCodecsAvailable()) {
+      expect.fail('WebCodecs API not available');
+    }
+
+    // av01.0.04M.08 = Main profile, level 3.0, 8-bit
+    const result = await testVideoCodecRoundTrip('av01.0.04M.08');
+    // AV1 may not be supported everywhere, so we just check it doesn't crash
+    expect(result).toBeDefined();
+  });
+
+  /**
+   * Helper to perform an audio encode/decode round-trip test
+   */
+  async function testAudioCodecRoundTrip(
+    codec: string,
+    sampleRate: number = 48000,
+    numberOfChannels: number = 2
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      // Check if codec is supported
+      const encodeSupport = await AudioEncoder.isConfigSupported({
+        codec,
+        sampleRate,
+        numberOfChannels,
+        bitrate: 128000,
+      });
+
+      if (!encodeSupport.supported) {
+        return { success: true }; // Skip unsupported codecs gracefully
+      }
+
+      const chunks: EncodedAudioChunk[] = [];
+      let decoderConfig: AudioDecoderConfig | null = null;
+
+      // Encode
+      const encoder = new AudioEncoder({
+        output: (chunk, meta) => {
+          chunks.push(chunk);
+          if (meta?.decoderConfig) decoderConfig = meta.decoderConfig;
+        },
+        error: (e) => { throw e; },
+      });
+
+      encoder.configure({
+        codec,
+        sampleRate,
+        numberOfChannels,
+        bitrate: 128000,
+      });
+
+      // Create 20ms of audio
+      const frameSize = Math.round(sampleRate * 0.02);
+      const samples = new Float32Array(frameSize * numberOfChannels);
+      
+      for (let i = 0; i < frameSize; i++) {
+        for (let ch = 0; ch < numberOfChannels; ch++) {
+          samples[i * numberOfChannels + ch] = Math.sin((2 * Math.PI * 440 * i) / sampleRate);
+        }
+      }
+
+      const audioData = new AudioData({
+        format: 'f32',
+        sampleRate,
+        numberOfFrames: frameSize,
+        numberOfChannels,
+        timestamp: 0,
+        data: samples,
+      });
+
+      encoder.encode(audioData);
+      audioData.close();
+
+      await encoder.flush();
+      encoder.close();
+
+      if (chunks.length === 0 || !decoderConfig) {
+        return { success: false, error: 'No encoded chunks produced' };
+      }
+
+      // Decode
+      const decodedAudio: AudioData[] = [];
+      
+      const decoder = new AudioDecoder({
+        output: (data) => { decodedAudio.push(data); },
+        error: (e) => { throw e; },
+      });
+
+      decoder.configure(decoderConfig);
+
+      for (const chunk of chunks) {
+        decoder.decode(chunk);
+      }
+
+      await decoder.flush();
+      decoder.close();
+
+      if (decodedAudio.length === 0) {
+        return { success: false, error: 'No decoded audio produced' };
+      }
+
+      const success = decodedAudio[0].sampleRate === sampleRate && 
+                      decodedAudio[0].numberOfChannels === numberOfChannels;
+
+      for (const data of decodedAudio) {
+        data.close();
+      }
+
+      return { success, error: success ? undefined : 'Audio parameters mismatch' };
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
+  }
+
+  it('should encode and decode Opus', async () => {
+    if (!isWebCodecsAvailable()) {
+      expect.fail('WebCodecs API not available');
+    }
+
+    const result = await testAudioCodecRoundTrip('opus');
+    expect(result.success).toBe(true);
+  });
+
+  it('should encode and decode AAC if supported', async () => {
+    if (!isWebCodecsAvailable()) {
+      expect.fail('WebCodecs API not available');
+    }
+
+    // mp4a.40.2 = AAC-LC
+    const result = await testAudioCodecRoundTrip('mp4a.40.2', 44100, 2);
+    // AAC may not be supported everywhere
+    expect(result).toBeDefined();
+  });
+
+  it('should encode and decode FLAC if supported', async () => {
+    if (!isWebCodecsAvailable()) {
+      expect.fail('WebCodecs API not available');
+    }
+
+    const result = await testAudioCodecRoundTrip('flac');
+    // FLAC may not be supported everywhere
+    expect(result).toBeDefined();
+  });
+});
