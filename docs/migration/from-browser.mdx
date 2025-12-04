@@ -1,0 +1,843 @@
+---
+title: "Migrating from Browser WebCodecs"
+description: "Use the same WebCodecs API in Node.js with 100% compatibility"
+---
+
+## Why Migrate to Node.js?
+
+Browser WebCodecs is perfect for client-side video processing, but server-side encoding unlocks:
+
+<CardGroup cols={2}>
+  <Card title="Privacy & Security" icon="shield">
+    Process sensitive videos server-side without client uploads
+  </Card>
+  <Card title="Computational Power" icon="server">
+    Use dedicated hardware encoders (NVENC, VideoToolbox, QuickSync)
+  </Card>
+  <Card title="Batch Processing" icon="layer-group">
+    Process thousands of videos in parallel worker threads
+  </Card>
+  <Card title="Isomorphic Code" icon="code-merge">
+    Share effects code between browser preview and server export
+  </Card>
+</CardGroup>
+
+## API Compatibility
+
+**node-webcodecs implements 100% of the browser WebCodecs API.** Code that works in Chrome/Firefox/Safari works in Node.js without changes.
+
+<Tabs>
+  <Tab title="Browser">
+    ```javascript
+    // Browser code
+    const encoder = new VideoEncoder({
+      output: (chunk, metadata) => {
+        // Save to IndexedDB or upload
+      },
+      error: (err) => console.error(err)
+    });
+
+    encoder.configure({
+      codec: 'avc1.42E01E',
+      width: 1920,
+      height: 1080,
+      bitrate: 5_000_000
+    });
+
+    const frame = new VideoFrame(videoElement, {
+      timestamp: 0
+    });
+
+    encoder.encode(frame);
+    frame.close();
+    ```
+  </Tab>
+
+  <Tab title="Node.js">
+    ```javascript
+    // Node.js code (IDENTICAL API)
+    const { VideoEncoder, VideoFrame } = require('node-webcodecs');
+
+    const encoder = new VideoEncoder({
+      output: (chunk, metadata) => {
+        // Save to file or stream to client
+      },
+      error: (err) => console.error(err)
+    });
+
+    encoder.configure({
+      codec: 'avc1.42E01E',
+      width: 1920,
+      height: 1080,
+      bitrate: 5_000_000
+    });
+
+    const frame = new VideoFrame(buffer, {
+      format: 'RGBA',
+      codedWidth: 1920,
+      codedHeight: 1080,
+      timestamp: 0
+    });
+
+    encoder.encode(frame);
+    frame.close();
+    ```
+  </Tab>
+</Tabs>
+
+**Key takeaway**: The only difference is the import statement and frame sources (no DOM in Node.js).
+
+## Key Differences
+
+While the WebCodecs API is identical, the runtime environment differs:
+
+### 1. No Canvas API (Use node-canvas)
+
+<Tabs>
+  <Tab title="Browser">
+    ```javascript
+    // Browser: Use native Canvas API
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    canvas.width = 1920;
+    canvas.height = 1080;
+
+    ctx.fillStyle = 'red';
+    ctx.fillRect(0, 0, 1920, 1080);
+
+    const frame = new VideoFrame(canvas, { timestamp: 0 });
+    encoder.encode(frame);
+    frame.close();
+    ```
+  </Tab>
+
+  <Tab title="Node.js">
+    ```javascript
+    // Node.js: Use node-canvas package
+    const { createCanvas } = require('canvas');
+    const { VideoFrame } = require('node-webcodecs');
+
+    const canvas = createCanvas(1920, 1080);
+    const ctx = canvas.getContext('2d');
+
+    ctx.fillStyle = 'red';
+    ctx.fillRect(0, 0, 1920, 1080);
+
+    // Get RGBA buffer from canvas
+    const imageData = ctx.getImageData(0, 0, 1920, 1080);
+    const frame = new VideoFrame(imageData.data, {
+      format: 'RGBA',
+      codedWidth: 1920,
+      codedHeight: 1080,
+      timestamp: 0
+    });
+
+    encoder.encode(frame);
+    frame.close();
+    ```
+
+    **Install node-canvas:**
+    ```bash
+    npm install canvas
+    ```
+  </Tab>
+</Tabs>
+
+### 2. Worker Threads (Use useWorkerThread option)
+
+<Tabs>
+  <Tab title="Browser">
+    ```javascript
+    // Browser: Use Web Workers for parallel encoding
+    const worker = new Worker('encoder-worker.js');
+
+    worker.postMessage({
+      type: 'encode',
+      buffer: frameBuffer,
+      timestamp: 0
+    });
+
+    worker.onmessage = (e) => {
+      const { chunk } = e.data;
+      // Handle encoded chunk
+    };
+    ```
+  </Tab>
+
+  <Tab title="Node.js">
+    ```javascript
+    // Node.js: Use built-in worker thread option
+    const { VideoEncoder } = require('node-webcodecs');
+
+    const encoder = new VideoEncoder({
+      output: (chunk) => {
+        // Encoding happens in worker thread automatically
+        // Callback runs on main thread
+      },
+      error: (err) => console.error(err),
+      useWorkerThread: true  // ← Enable worker thread
+    });
+
+    encoder.configure({
+      codec: 'avc1.42E01E',
+      width: 1920,
+      height: 1080
+    });
+
+    // Frames are transferred to worker thread automatically
+    encoder.encode(frame);
+    ```
+
+    **Benefits:**
+    - No separate worker file needed
+    - Automatic buffer transfer
+    - Same callback interface
+  </Tab>
+</Tabs>
+
+### 3. Hardware Acceleration
+
+<Tabs>
+  <Tab title="Browser">
+    ```javascript
+    // Browser: Hardware acceleration is automatic
+    encoder.configure({
+      codec: 'avc1.42E01E',
+      width: 1920,
+      height: 1080,
+      hardwareAcceleration: 'prefer-hardware'
+    });
+    ```
+  </Tab>
+
+  <Tab title="Node.js">
+    ```javascript
+    // Node.js: Specify platform-specific encoders
+    encoder.configure({
+      // macOS: VideoToolbox (h264_videotoolbox)
+      // Windows: QuickSync (h264_qsv) or NVENC (h264_nvenc)
+      // Linux: VA-API (h264_vaapi) or NVENC (h264_nvenc)
+      codec: 'h264_videotoolbox',  // Platform-specific
+      width: 1920,
+      height: 1080
+    });
+    ```
+
+    See [Hardware Acceleration Guide](/guides/hardware-acceleration) for platform detection.
+  </Tab>
+</Tabs>
+
+### 4. File System Access
+
+<Tabs>
+  <Tab title="Browser">
+    ```javascript
+    // Browser: Use File API or IndexedDB
+    const chunks = [];
+
+    const encoder = new VideoEncoder({
+      output: (chunk) => {
+        chunks.push(chunk);
+      },
+      error: (err) => console.error(err)
+    });
+
+    await encoder.flush();
+
+    // Create Blob and download
+    const blob = new Blob(chunks, { type: 'video/mp4' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'output.mp4';
+    a.click();
+    ```
+  </Tab>
+
+  <Tab title="Node.js">
+    ```javascript
+    // Node.js: Use fs module directly
+    const fs = require('fs');
+    const chunks = [];
+
+    const encoder = new VideoEncoder({
+      output: (chunk) => {
+        const buffer = Buffer.alloc(chunk.byteLength);
+        chunk.copyTo(buffer);
+        chunks.push(buffer);
+      },
+      error: (err) => console.error(err)
+    });
+
+    await encoder.flush();
+
+    // Write directly to file system
+    const output = Buffer.concat(chunks);
+    fs.writeFileSync('output.h264', output);
+    ```
+  </Tab>
+</Tabs>
+
+## Isomorphic Code Patterns
+
+Write code that works in **both** browser and Node.js:
+
+### Pattern 1: Shared Effects Module
+
+```typescript
+// effects.ts (works in browser AND Node.js)
+import type { VideoFrame } from 'node-webcodecs';
+
+export interface Effect {
+  process(frame: VideoFrame, timestamp: number): VideoFrame;
+}
+
+export class FadeInEffect implements Effect {
+  constructor(private duration: number) {}
+
+  process(frame: VideoFrame, timestamp: number): VideoFrame {
+    const opacity = Math.min(timestamp / this.duration, 1);
+
+    // This logic works in both environments
+    const buffer = new Uint8ClampedArray(
+      frame.codedWidth * frame.codedHeight * 4
+    );
+
+    frame.copyTo(buffer);
+
+    // Apply opacity
+    for (let i = 3; i < buffer.length; i += 4) {
+      buffer[i] = Math.floor(buffer[i] * opacity);
+    }
+
+    return new VideoFrame(buffer, {
+      format: frame.format,
+      codedWidth: frame.codedWidth,
+      codedHeight: frame.codedHeight,
+      timestamp: frame.timestamp
+    });
+  }
+}
+```
+
+### Pattern 2: Platform-Specific Factories
+
+```typescript
+// video-processor.ts
+import type { VideoEncoder, VideoFrame } from 'node-webcodecs';
+
+interface VideoProcessorConfig {
+  width: number;
+  height: number;
+  fps: number;
+}
+
+export function createVideoProcessor(config: VideoProcessorConfig) {
+  const isNode = typeof process !== 'undefined' && process.versions?.node;
+
+  if (isNode) {
+    // Node.js: Import node-webcodecs
+    const { VideoEncoder, VideoFrame } = require('node-webcodecs');
+    return new NodeVideoProcessor(VideoEncoder, VideoFrame, config);
+  } else {
+    // Browser: Use globals
+    return new BrowserVideoProcessor(
+      window.VideoEncoder,
+      window.VideoFrame,
+      config
+    );
+  }
+}
+
+class NodeVideoProcessor {
+  constructor(
+    private Encoder: typeof VideoEncoder,
+    private Frame: typeof VideoFrame,
+    private config: VideoProcessorConfig
+  ) {}
+
+  // Shared implementation using this.Encoder and this.Frame
+}
+
+class BrowserVideoProcessor {
+  constructor(
+    private Encoder: typeof VideoEncoder,
+    private Frame: typeof VideoFrame,
+    private config: VideoProcessorConfig
+  ) {}
+
+  // Same shared implementation
+}
+```
+
+### Pattern 3: Frame Source Abstraction
+
+```typescript
+// frame-source.ts
+import type { VideoFrame } from 'node-webcodecs';
+
+export interface FrameSource {
+  getNextFrame(): Promise<VideoFrame | null>;
+  close(): void;
+}
+
+// Browser implementation
+export class CanvasFrameSource implements FrameSource {
+  constructor(private canvas: HTMLCanvasElement) {}
+
+  async getNextFrame(): Promise<VideoFrame | null> {
+    return new VideoFrame(this.canvas, {
+      timestamp: performance.now() * 1000
+    });
+  }
+
+  close() {
+    // Cleanup if needed
+  }
+}
+
+// Node.js implementation
+export class BufferFrameSource implements FrameSource {
+  private frameIndex = 0;
+
+  constructor(
+    private buffers: Buffer[],
+    private width: number,
+    private height: number,
+    private fps: number
+  ) {}
+
+  async getNextFrame(): Promise<VideoFrame | null> {
+    if (this.frameIndex >= this.buffers.length) return null;
+
+    const { VideoFrame } = require('node-webcodecs');
+    const frame = new VideoFrame(this.buffers[this.frameIndex], {
+      format: 'RGBA',
+      codedWidth: this.width,
+      codedHeight: this.height,
+      timestamp: (this.frameIndex * 1_000_000) / this.fps
+    });
+
+    this.frameIndex++;
+    return frame;
+  }
+
+  close() {
+    // Cleanup
+  }
+}
+```
+
+## Migration Checklist
+
+<Steps>
+  <Step title="Update imports">
+    ```diff
+    - const encoder = new VideoEncoder({ /* ... */ });
+    + const { VideoEncoder, VideoFrame } = require('node-webcodecs');
+    + const encoder = new VideoEncoder({ /* ... */ });
+    ```
+  </Step>
+
+  <Step title="Replace Canvas API with node-canvas">
+    ```bash
+    npm install canvas
+    ```
+
+    ```diff
+    - const canvas = document.createElement('canvas');
+    + const { createCanvas } = require('canvas');
+    + const canvas = createCanvas(width, height);
+    ```
+  </Step>
+
+  <Step title="Update frame creation">
+    ```diff
+    - const frame = new VideoFrame(videoElement, { timestamp: 0 });
+    + const frame = new VideoFrame(buffer, {
+    +   format: 'RGBA',
+    +   codedWidth: 1920,
+    +   codedHeight: 1080,
+    +   timestamp: 0
+    + });
+    ```
+  </Step>
+
+  <Step title="Replace IndexedDB with file system">
+    ```diff
+    - const db = await openDB('video-chunks');
+    - await db.put('chunks', chunk);
+    + const fs = require('fs');
+    + fs.appendFileSync('output.h264', chunkBuffer);
+    ```
+  </Step>
+
+  <Step title="Enable worker threads (optional)">
+    ```diff
+    const encoder = new VideoEncoder({
+      output: (chunk) => { /* ... */ },
+      error: (err) => console.error(err),
+    + useWorkerThread: true
+    });
+    ```
+  </Step>
+
+  <Step title="Add hardware acceleration (optional)">
+    ```diff
+    encoder.configure({
+    - codec: 'avc1.42E01E',
+    + codec: 'h264_videotoolbox', // macOS
+    + // codec: 'h264_nvenc',      // NVIDIA
+    + // codec: 'h264_qsv',        // Intel QuickSync
+      width: 1920,
+      height: 1080
+    });
+    ```
+  </Step>
+</Steps>
+
+## Real-World Example: Isomorphic Video Editor
+
+Here's a complete example of an effects system that works in both environments:
+
+<CodeGroup>
+```typescript Shared Effects (effects.ts)
+// Works in BOTH browser and Node.js
+export interface VideoEffect {
+  name: string;
+  process(frame: VideoFrame, context: EffectContext): VideoFrame;
+}
+
+export interface EffectContext {
+  timestamp: number;
+  frameNumber: number;
+  totalFrames: number;
+}
+
+export class WatermarkEffect implements VideoEffect {
+  name = 'watermark';
+
+  constructor(
+    private text: string,
+    private x: number,
+    private y: number
+  ) {}
+
+  process(frame: VideoFrame, context: EffectContext): VideoFrame {
+    const { codedWidth, codedHeight, timestamp, format } = frame;
+
+    // Extract frame data
+    const buffer = new Uint8ClampedArray(codedWidth * codedHeight * 4);
+    frame.copyTo(buffer);
+
+    // Simple text watermark (pixel manipulation)
+    // In production, use node-canvas or OffscreenCanvas
+    const textBytes = new TextEncoder().encode(this.text);
+    const offset = (this.y * codedWidth + this.x) * 4;
+
+    for (let i = 0; i < textBytes.length * 8; i++) {
+      buffer[offset + i] = 255; // White pixels
+    }
+
+    // Create new frame with watermark
+    const { VideoFrame } = getVideoFrameClass();
+    const newFrame = new VideoFrame(buffer, {
+      format,
+      codedWidth,
+      codedHeight,
+      timestamp
+    });
+
+    return newFrame;
+  }
+}
+
+function getVideoFrameClass() {
+  if (typeof process !== 'undefined' && process.versions?.node) {
+    return require('node-webcodecs');
+  }
+  return { VideoFrame: window.VideoFrame };
+}
+```
+
+```typescript Browser Usage (browser.ts)
+import { WatermarkEffect } from './effects';
+
+const effect = new WatermarkEffect('© 2024', 10, 10);
+
+const encoder = new VideoEncoder({
+  output: (chunk) => saveChunk(chunk),
+  error: (err) => console.error(err)
+});
+
+encoder.configure({
+  codec: 'avc1.42E01E',
+  width: 1920,
+  height: 1080
+});
+
+// Browser: Get frames from <video> element
+const video = document.querySelector('video');
+let frameNumber = 0;
+
+function captureFrame() {
+  const frame = new VideoFrame(video, {
+    timestamp: video.currentTime * 1_000_000
+  });
+
+  const processedFrame = effect.process(frame, {
+    timestamp: frame.timestamp,
+    frameNumber: frameNumber++,
+    totalFrames: 300
+  });
+
+  encoder.encode(processedFrame);
+
+  frame.close();
+  processedFrame.close();
+
+  if (frameNumber < 300) {
+    requestAnimationFrame(captureFrame);
+  }
+}
+
+video.requestVideoFrameCallback(captureFrame);
+```
+
+```typescript Node.js Usage (server.ts)
+import { WatermarkEffect } from './effects';
+import { VideoEncoder, VideoFrame } from 'node-webcodecs';
+import { createCanvas } from 'canvas';
+import fs from 'fs';
+
+const effect = new WatermarkEffect('© 2024', 10, 10);
+
+const chunks: Buffer[] = [];
+
+const encoder = new VideoEncoder({
+  output: (chunk) => {
+    const buffer = Buffer.alloc(chunk.byteLength);
+    chunk.copyTo(buffer);
+    chunks.push(buffer);
+  },
+  error: (err) => console.error(err),
+  useWorkerThread: true  // Node.js optimization
+});
+
+encoder.configure({
+  codec: 'h264_videotoolbox',  // Hardware acceleration
+  width: 1920,
+  height: 1080,
+  bitrate: 5_000_000
+});
+
+// Node.js: Generate frames programmatically
+const canvas = createCanvas(1920, 1080);
+const ctx = canvas.getContext('2d');
+
+for (let i = 0; i < 300; i++) {
+  // Draw frame content
+  ctx.fillStyle = `hsl(${i % 360}, 70%, 50%)`;
+  ctx.fillRect(0, 0, 1920, 1080);
+
+  // Get RGBA buffer
+  const imageData = ctx.getImageData(0, 0, 1920, 1080);
+
+  const frame = new VideoFrame(imageData.data, {
+    format: 'RGBA',
+    codedWidth: 1920,
+    codedHeight: 1080,
+    timestamp: i * 33333  // 30fps
+  });
+
+  const processedFrame = effect.process(frame, {
+    timestamp: frame.timestamp,
+    frameNumber: i,
+    totalFrames: 300
+  });
+
+  encoder.encode(processedFrame);
+
+  frame.close();
+  processedFrame.close();
+}
+
+await encoder.flush();
+encoder.close();
+
+fs.writeFileSync('output.h264', Buffer.concat(chunks));
+console.log(`✓ Encoded ${chunks.length} chunks`);
+```
+</CodeGroup>
+
+## Performance Comparison
+
+<Tabs>
+  <Tab title="Browser">
+    **Browser Strengths:**
+    - Zero installation (runs in any modern browser)
+    - Direct access to `<video>`, `<canvas>`, WebCam
+    - Automatic hardware acceleration
+    - Low latency for preview
+
+    **Browser Limitations:**
+    - Limited to user's device hardware
+    - No batch processing
+    - Privacy concerns (upload required for server processing)
+    - Tab backgrounding throttles encoding
+  </Tab>
+
+  <Tab title="Node.js">
+    **Node.js Strengths:**
+    - Dedicated server hardware (GPUs, high RAM)
+    - Parallel processing (worker threads)
+    - Batch operations (process 1000s of videos)
+    - Privacy (no client uploads)
+    - Platform-specific encoders (8-15x faster)
+
+    **Node.js Considerations:**
+    - Requires FFmpeg libraries
+    - No direct DOM access (use node-canvas)
+    - Slightly more setup complexity
+  </Tab>
+</Tabs>
+
+## Hybrid Architecture
+
+Best practice: Use **both** browser and Node.js WebCodecs together:
+
+```typescript
+// Architecture: Browser preview + Server export
+
+// 1. Browser: Real-time preview (low quality, fast)
+const previewEncoder = new VideoEncoder({
+  output: (chunk) => displayPreview(chunk),
+  error: (err) => console.error(err)
+});
+
+previewEncoder.configure({
+  codec: 'avc1.42E01E',
+  width: 640,   // Lower resolution
+  height: 360,
+  bitrate: 500_000  // Lower bitrate
+});
+
+// 2. Server: Final export (high quality, hardware accelerated)
+fetch('/api/export', {
+  method: 'POST',
+  body: JSON.stringify({
+    effects: [
+      { type: 'watermark', text: '© 2024', x: 10, y: 10 },
+      { type: 'fadeIn', duration: 1000 }
+    ],
+    codec: 'h264_videotoolbox',
+    width: 1920,
+    height: 1080,
+    bitrate: 8_000_000
+  })
+});
+```
+
+**Server endpoint (Node.js):**
+```typescript
+// api/export.ts
+import { VideoEncoder, VideoFrame } from 'node-webcodecs';
+import { applyEffects } from './shared/effects';  // Isomorphic module
+
+app.post('/api/export', async (req, res) => {
+  const { effects, codec, width, height, bitrate } = req.body;
+
+  const encoder = new VideoEncoder({
+    output: (chunk) => {
+      // Stream to client or save to S3
+    },
+    error: (err) => console.error(err),
+    useWorkerThread: true
+  });
+
+  encoder.configure({ codec, width, height, bitrate });
+
+  // Apply same effects as browser preview
+  for (const frame of frames) {
+    const processed = applyEffects(frame, effects);
+    encoder.encode(processed);
+    processed.close();
+  }
+
+  await encoder.flush();
+  encoder.close();
+});
+```
+
+## Common Gotchas
+
+<Warning>
+**1. Forgetting to import VideoFrame in Node.js**
+
+```javascript
+❌ Wrong:
+const frame = new VideoFrame(buffer, { ... });
+// ReferenceError: VideoFrame is not defined
+
+✅ Correct:
+const { VideoFrame } = require('node-webcodecs');
+const frame = new VideoFrame(buffer, { ... });
+```
+</Warning>
+
+<Warning>
+**2. Using DOM APIs directly**
+
+```javascript
+❌ Wrong (Node.js):
+const frame = new VideoFrame(videoElement, { timestamp: 0 });
+// ReferenceError: videoElement is not defined
+
+✅ Correct (Node.js):
+const frame = new VideoFrame(buffer, {
+  format: 'RGBA',
+  codedWidth: 1920,
+  codedHeight: 1080,
+  timestamp: 0
+});
+```
+</Warning>
+
+<Warning>
+**3. Not specifying format in Node.js**
+
+```javascript
+❌ Wrong:
+const frame = new VideoFrame(buffer, {
+  codedWidth: 1920,
+  codedHeight: 1080,
+  timestamp: 0
+});
+// Error: format is required when constructing from buffer
+
+✅ Correct:
+const frame = new VideoFrame(buffer, {
+  format: 'RGBA',  // ← Required in Node.js
+  codedWidth: 1920,
+  codedHeight: 1080,
+  timestamp: 0
+});
+```
+</Warning>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Hardware Acceleration" icon="microchip" href="/guides/hardware-acceleration">
+    8-15x faster encoding on server
+  </Card>
+  <Card title="Worker Threads" icon="server" href="/guides/worker-threads">
+    Parallel video processing
+  </Card>
+  <Card title="API Reference" icon="book" href="/api/video-encoder">
+    Complete WebCodecs API docs
+  </Card>
+  <Card title="Cookbook" icon="flask" href="/cookbook/overview">
+    Real-world recipes
+  </Card>
+</CardGroup>

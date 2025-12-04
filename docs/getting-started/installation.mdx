@@ -1,0 +1,295 @@
+---
+title: "Installation"
+description: "Platform-specific installation guide for node-webcodecs"
+---
+
+## Requirements
+
+- **Node.js** 18 or higher (or Bun 1.0+)
+- **FFmpeg libraries** (libavcodec, libavutil, libswscale, libswresample)
+- **pkg-config** (for finding FFmpeg during build)
+- **C++ compiler** (Xcode Command Line Tools on macOS, build-essential on Linux)
+
+## Platform-Specific Setup
+
+<Tabs>
+  <Tab title="macOS">
+    ### macOS Installation
+
+    Install FFmpeg and pkg-config via Homebrew:
+
+    ```bash
+    brew install ffmpeg pkg-config
+    ```
+
+    Ensure Homebrew is in your PATH (add to `~/.zshrc` or `~/.bashrc`):
+
+    ```bash
+    export PATH="/opt/homebrew/bin:$PATH"
+    ```
+
+    <Accordion title="M1/M2/M3 Mac Users">
+      On Apple Silicon Macs, Homebrew installs to `/opt/homebrew` by default. Make sure this is in your PATH:
+
+      ```bash
+      echo 'export PATH="/opt/homebrew/bin:$PATH"' >> ~/.zshrc
+      source ~/.zshrc
+      ```
+    </Accordion>
+
+    <Accordion title="Intel Mac Users">
+      On Intel Macs, Homebrew installs to `/usr/local`. Ensure `/usr/local/bin` is in your PATH:
+
+      ```bash
+      echo 'export PATH="/usr/local/bin:$PATH"' >> ~/.zshrc
+      source ~/.zshrc
+      ```
+    </Accordion>
+
+    ### Install node-webcodecs
+
+    ```bash
+    npm install node-webcodecs
+    ```
+
+    <Note>
+      **First build may take 2-3 minutes** as native bindings compile against your FFmpeg installation.
+    </Note>
+  </Tab>
+
+  <Tab title="Ubuntu/Debian">
+    ### Ubuntu/Debian Installation
+
+    Install FFmpeg development libraries and build tools:
+
+    ```bash
+    sudo apt-get update
+    sudo apt-get install build-essential pkg-config \
+      libavcodec-dev libavutil-dev libswscale-dev libswresample-dev
+    ```
+
+    ### Install node-webcodecs
+
+    ```bash
+    npm install node-webcodecs
+    ```
+
+    <Accordion title="Specific FFmpeg Version">
+      To install a specific FFmpeg version:
+
+      ```bash
+      # For FFmpeg 6.x
+      sudo apt-get install ffmpeg=7:6.* libavcodec-dev=7:6.*
+
+      # Check installed version
+      ffmpeg -version
+      ```
+    </Accordion>
+
+    <Accordion title="Ubuntu 20.04 or older">
+      Ubuntu 20.04 ships with older FFmpeg. Consider using a PPA for newer versions:
+
+      ```bash
+      sudo add-apt-repository ppa:savoury1/ffmpeg4
+      sudo apt-get update
+      sudo apt-get install ffmpeg libavcodec-dev
+      ```
+    </Accordion>
+  </Tab>
+
+  <Tab title="Windows">
+    ### Windows Installation
+
+    <Steps>
+      <Step title="Install FFmpeg">
+        Download FFmpeg from [ffmpeg.org](https://ffmpeg.org/download.html) or use vcpkg:
+
+        ```powershell
+        vcpkg install ffmpeg:x64-windows
+        ```
+      </Step>
+
+      <Step title="Add FFmpeg to PATH">
+        Add FFmpeg's `bin` directory to your system PATH:
+
+        1. Search for "Environment Variables" in Start Menu
+        2. Edit System Variables → PATH
+        3. Add FFmpeg bin directory (e.g., `C:\ffmpeg\bin`)
+      </Step>
+
+      <Step title="Install pkg-config">
+        Install pkg-config via Chocolatey or vcpkg:
+
+        ```powershell
+        choco install pkgconfiglite
+        ```
+      </Step>
+
+      <Step title="Install Build Tools">
+        Install Visual Studio Build Tools or full Visual Studio with C++ workload.
+      </Step>
+
+      <Step title="Install node-webcodecs">
+        ```powershell
+        npm install node-webcodecs
+        ```
+      </Step>
+    </Steps>
+
+    <Warning>
+      Windows builds can be tricky. If you encounter issues, try using WSL2 with the Ubuntu instructions instead.
+    </Warning>
+  </Tab>
+
+  <Tab title="Docker">
+    ### Docker Installation
+
+    Create a `Dockerfile` with FFmpeg pre-installed:
+
+    ```dockerfile
+    FROM node:20
+
+    # Install FFmpeg and dependencies
+    RUN apt-get update && apt-get install -y \
+        ffmpeg \
+        libavcodec-dev \
+        libavutil-dev \
+        libswscale-dev \
+        libswresample-dev \
+        pkg-config \
+        build-essential \
+        && rm -rf /var/lib/apt/lists/*
+
+    WORKDIR /app
+
+    # Copy package files
+    COPY package*.json ./
+
+    # Install dependencies (includes node-webcodecs compilation)
+    RUN npm install
+
+    COPY . .
+
+    CMD ["node", "index.js"]
+    ```
+
+    Build and run:
+
+    ```bash
+    docker build -t my-video-app .
+    docker run my-video-app
+    ```
+  </Tab>
+</Tabs>
+
+## Verification
+
+Verify your installation works:
+
+```javascript
+const { VideoEncoder, getFFmpegVersion } = require('node-webcodecs');
+
+// Check FFmpeg version
+const version = getFFmpegVersion();
+console.log('FFmpeg version:', version);
+// Output: { avcodec: '60.31.102', avcodecVersion: '60.31.102' }
+
+// Check codec availability
+const { hasCodec } = require('node-webcodecs');
+console.log('H.264 encoder:', hasCodec('h264', 'encoder'));
+console.log('VP9 decoder:', hasCodec('vp9', 'decoder'));
+```
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Error: Cannot find module 'node-webcodecs'">
+    The native module failed to compile. Check that:
+
+    1. FFmpeg libraries are installed (`brew list ffmpeg` or `dpkg -l | grep libavcodec`)
+    2. pkg-config can find FFmpeg (`pkg-config --modversion libavcodec`)
+    3. You have a C++ compiler installed
+
+    Try rebuilding:
+
+    ```bash
+    npm rebuild node-webcodecs
+    ```
+  </Accordion>
+
+  <Accordion title="Error: Library not loaded: libavcodec">
+    FFmpeg libraries aren't in your dynamic library path.
+
+    **macOS:**
+    ```bash
+    export DYLD_LIBRARY_PATH="/opt/homebrew/lib:$DYLD_LIBRARY_PATH"
+    ```
+
+    **Linux:**
+    ```bash
+    export LD_LIBRARY_PATH="/usr/local/lib:$LD_LIBRARY_PATH"
+    ```
+
+    Add to your shell profile (`.zshrc`, `.bashrc`) to make permanent.
+  </Accordion>
+
+  <Accordion title="Error: pkg-config not found">
+    Install pkg-config:
+
+    **macOS:**
+    ```bash
+    brew install pkg-config
+    ```
+
+    **Ubuntu/Debian:**
+    ```bash
+    sudo apt-get install pkg-config
+    ```
+
+    **Windows:**
+    ```powershell
+    choco install pkgconfiglite
+    ```
+  </Accordion>
+
+  <Accordion title="Build takes forever or fails">
+    If the native compilation is failing or taking too long:
+
+    1. Check you have enough RAM (compilation needs ~2GB)
+    2. Try cleaning node_modules:
+       ```bash
+       rm -rf node_modules package-lock.json
+       npm install
+       ```
+    3. Check compiler version (GCC 7+ or Clang 5+ recommended)
+  </Accordion>
+
+  <Accordion title="Prebuilt binaries not available">
+    node-webcodecs currently builds from source on install. Future releases may include prebuilt binaries for common platforms.
+
+    Building from source ensures compatibility with your specific FFmpeg version and hardware encoders.
+  </Accordion>
+</AccordionGroup>
+
+## Runtime Support
+
+<CardGroup cols={2}>
+  <Card title="Node.js 18+" icon="node-js">
+    Full support for Node.js 18.x, 20.x, 22.x
+  </Card>
+  <Card title="Bun 1.0+" icon="bread-slice">
+    Full compatibility via N-API
+  </Card>
+</CardGroup>
+
+## Next Steps
+
+<Card title="Quick Start Tutorial" icon="rocket" href="/getting-started/quick-start">
+  Get your first video encoding in 5 minutes
+</Card>
+
+## Sources
+
+- [Mintlify Quickstart](https://www.mintlify.com/docs/quickstart)
+- [Setting up a Documentation Site with Mintlify](https://kenudeh.hashnode.dev/setting-up-a-docs-site-with-mintlify)
+- [A Step-by-Step Guide to Creating a Beautiful Documentation Site with Mintlify](https://dev.to/therealmrmumba/a-step-by-step-guide-to-creating-a-beautiful-documentation-site-with-mintlify-532m)

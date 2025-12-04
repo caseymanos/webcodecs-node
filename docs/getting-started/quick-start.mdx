@@ -1,0 +1,403 @@
+---
+title: "Quick Start"
+description: "Encode your first video in 5 minutes with node-webcodecs"
+---
+
+## Your First Video Encode
+
+This tutorial will have you encoding video frames in under 5 minutes.
+
+<Steps>
+  <Step title="Install node-webcodecs">
+    ```bash
+    npm install node-webcodecs
+    ```
+
+    <Note>
+      Make sure you've installed FFmpeg first. See [Installation Guide](/getting-started/installation) if you haven't.
+    </Note>
+  </Step>
+
+  <Step title="Create a simple encoder">
+    Create a file called `encode.js`:
+
+    ```javascript
+    const { VideoEncoder, VideoFrame } = require('node-webcodecs');
+    const fs = require('fs');
+
+    // Collect encoded chunks
+    const chunks = [];
+
+    // Create encoder
+    const encoder = new VideoEncoder({
+      output: (chunk, metadata) => {
+        // Convert chunk to Buffer and save
+        const buffer = Buffer.alloc(chunk.byteLength);
+        chunk.copyTo(buffer);
+        chunks.push(buffer);
+
+        console.log(`Encoded chunk ${chunks.length}: ${chunk.byteLength} bytes`);
+      },
+      error: (err) => console.error('Encoder error:', err)
+    });
+
+    // Configure for H.264
+    encoder.configure({
+      codec: 'avc1.42E01E',  // H.264 Baseline
+      width: 640,
+      height: 480,
+      bitrate: 1_000_000,    // 1 Mbps
+    });
+
+    console.log('Encoder configured!');
+    ```
+  </Step>
+
+  <Step title="Create and encode frames">
+    Add frame generation code:
+
+    ```javascript
+    // Helper: Create an RGBA buffer (red frame)
+    function createRedFrame(width, height) {
+      const size = width * height * 4; // RGBA
+      const buffer = Buffer.alloc(size);
+
+      for (let i = 0; i < size; i += 4) {
+        buffer[i] = 255;     // Red
+        buffer[i + 1] = 0;   // Green
+        buffer[i + 2] = 0;   // Blue
+        buffer[i + 3] = 255; // Alpha
+      }
+
+      return buffer;
+    }
+
+    // Encode 30 frames (1 second at 30fps)
+    async function encodeVideo() {
+      const rgbaBuffer = createRedFrame(640, 480);
+
+      for (let i = 0; i < 30; i++) {
+        const frame = new VideoFrame(rgbaBuffer, {
+          format: 'RGBA',
+          codedWidth: 640,
+          codedHeight: 480,
+          timestamp: i * 33333, // 30fps = 33.333ms per frame
+        });
+
+        // First frame is keyframe
+        encoder.encode(frame, { keyFrame: i === 0 });
+
+        // CRITICAL: Always close frames to prevent memory leaks
+        frame.close();
+      }
+
+      // Wait for encoding to finish
+      await encoder.flush();
+      encoder.close();
+
+      // Save to file
+      const output = Buffer.concat(chunks);
+      fs.writeFileSync('output.h264', output);
+
+      console.log(`✓ Encoded ${chunks.length} chunks to output.h264`);
+      console.log(`✓ Total size: ${output.length} bytes`);
+    }
+
+    encodeVideo().catch(console.error);
+    ```
+  </Step>
+
+  <Step title="Run it!">
+    ```bash
+    node encode.js
+    ```
+
+    **Expected Output:**
+    ```
+    Encoder configured!
+    Encoded chunk 1: 1234 bytes
+    Encoded chunk 2: 856 bytes
+    Encoded chunk 3: 842 bytes
+    ...
+    ✓ Encoded 30 chunks to output.h264
+    ✓ Total size: 25600 bytes
+    ```
+  </Step>
+
+  <Step title="Verify the output">
+    Play the encoded video with FFmpeg:
+
+    ```bash
+    ffplay output.h264
+    ```
+
+    You should see a red screen for 1 second!
+  </Step>
+</Steps>
+
+## What Just Happened?
+
+<AccordionGroup>
+  <Accordion title="VideoEncoder setup">
+    ```javascript
+    const encoder = new VideoEncoder({
+      output: (chunk, metadata) => { /* handle encoded data */ },
+      error: (err) => { /* handle errors */ }
+    });
+    ```
+
+    The `output` callback receives:
+    - **chunk**: `EncodedVideoChunk` containing compressed data
+    - **metadata**: Decoder configuration (if this is the first chunk)
+  </Accordion>
+
+  <Accordion title="Configuration">
+    ```javascript
+    encoder.configure({
+      codec: 'avc1.42E01E',  // H.264 Baseline Level 3.0
+      width: 640,
+      height: 480,
+      bitrate: 1_000_000,
+    });
+    ```
+
+    - **codec**: MIME type or fourCC (see [Codec Reference](/guides/codecs))
+    - **bitrate**: Target bits per second
+    - **width/height**: Frame dimensions
+  </Accordion>
+
+  <Accordion title="Frame lifecycle">
+    ```javascript
+    const frame = new VideoFrame(buffer, { ... });
+    encoder.encode(frame, { keyFrame: true });
+    frame.close(); // ← MUST DO THIS!
+    ```
+
+    **Why `.close()` is critical:**
+    - VideoFrame wraps native C++ memory
+    - JavaScript GC doesn't see it
+    - Forgetting = memory leak!
+
+    **Rule**: Call `.close()` immediately after encoding.
+  </Accordion>
+
+  <Accordion title="Timestamps">
+    ```javascript
+    timestamp: i * 33333  // microseconds
+    ```
+
+    Timestamps are in **microseconds**, not milliseconds:
+    - 30 fps = 33,333 μs per frame
+    - 60 fps = 16,667 μs per frame
+    - 1 second = 1,000,000 μs
+  </Accordion>
+</AccordionGroup>
+
+## Full Example (TypeScript)
+
+<CodeGroup>
+```typescript TypeScript
+import { VideoEncoder, VideoFrame } from 'node-webcodecs';
+import { writeFileSync } from 'fs';
+
+interface EncoderOptions {
+  width: number;
+  height: number;
+  fps: number;
+  duration: number; // seconds
+}
+
+async function encodeRedVideo(options: EncoderOptions): Promise<Buffer> {
+  const { width, height, fps, duration } = options;
+  const chunks: Buffer[] = [];
+
+  const encoder = new VideoEncoder({
+    output: (chunk) => {
+      const buffer = Buffer.alloc(chunk.byteLength);
+      chunk.copyTo(buffer);
+      chunks.push(buffer);
+    },
+    error: (err) => { throw err; }
+  });
+
+  encoder.configure({
+    codec: 'avc1.42E01E',
+    width,
+    height,
+    bitrate: width * height * fps * 0.1, // 0.1 bits per pixel
+  });
+
+  const rgbaBuffer = createColorFrame(width, height, [255, 0, 0, 255]);
+  const frameDuration = 1_000_000 / fps; // microseconds
+  const totalFrames = duration * fps;
+
+  for (let i = 0; i < totalFrames; i++) {
+    const frame = new VideoFrame(rgbaBuffer, {
+      format: 'RGBA',
+      codedWidth: width,
+      codedHeight: height,
+      timestamp: i * frameDuration,
+    });
+
+    encoder.encode(frame, { keyFrame: i % (fps * 2) === 0 }); // Keyframe every 2s
+    frame.close();
+  }
+
+  await encoder.flush();
+  encoder.close();
+
+  return Buffer.concat(chunks);
+}
+
+function createColorFrame(
+  width: number,
+  height: number,
+  rgba: [number, number, number, number]
+): Buffer {
+  const buffer = Buffer.alloc(width * height * 4);
+  for (let i = 0; i < buffer.length; i += 4) {
+    buffer[i] = rgba[0];
+    buffer[i + 1] = rgba[1];
+    buffer[i + 2] = rgba[2];
+    buffer[i + 3] = rgba[3];
+  }
+  return buffer;
+}
+
+// Usage
+encodeRedVideo({ width: 1920, height: 1080, fps: 30, duration: 5 })
+  .then(buffer => {
+    writeFileSync('output.h264', buffer);
+    console.log(`Encoded ${buffer.length} bytes`);
+  })
+  .catch(console.error);
+```
+
+```javascript JavaScript
+const { VideoEncoder, VideoFrame } = require('node-webcodecs');
+const fs = require('fs');
+
+async function encodeRedVideo(options) {
+  const { width, height, fps, duration } = options;
+  const chunks = [];
+
+  const encoder = new VideoEncoder({
+    output: (chunk) => {
+      const buffer = Buffer.alloc(chunk.byteLength);
+      chunk.copyTo(buffer);
+      chunks.push(buffer);
+    },
+    error: (err) => { throw err; }
+  });
+
+  encoder.configure({
+    codec: 'avc1.42E01E',
+    width,
+    height,
+    bitrate: width * height * fps * 0.1,
+  });
+
+  const rgbaBuffer = createColorFrame(width, height, [255, 0, 0, 255]);
+  const frameDuration = 1_000_000 / fps;
+  const totalFrames = duration * fps;
+
+  for (let i = 0; i < totalFrames; i++) {
+    const frame = new VideoFrame(rgbaBuffer, {
+      format: 'RGBA',
+      codedWidth: width,
+      codedHeight: height,
+      timestamp: i * frameDuration,
+    });
+
+    encoder.encode(frame, { keyFrame: i % (fps * 2) === 0 });
+    frame.close();
+  }
+
+  await encoder.flush();
+  encoder.close();
+
+  return Buffer.concat(chunks);
+}
+
+function createColorFrame(width, height, rgba) {
+  const buffer = Buffer.alloc(width * height * 4);
+  for (let i = 0; i < buffer.length; i += 4) {
+    buffer[i] = rgba[0];
+    buffer[i + 1] = rgba[1];
+    buffer[i + 2] = rgba[2];
+    buffer[i + 3] = rgba[3];
+  }
+  return buffer;
+}
+
+// Usage
+encodeRedVideo({ width: 1920, height: 1080, fps: 30, duration: 5 })
+  .then(buffer => {
+    fs.writeFileSync('output.h264', buffer);
+    console.log(`Encoded ${buffer.length} bytes`);
+  })
+  .catch(console.error);
+```
+</CodeGroup>
+
+## Common Mistakes
+
+<Warning>
+**Forgetting to close frames**
+
+```javascript
+❌ Memory leak:
+encoder.encode(frame); // frame never closed
+
+✅ Correct:
+encoder.encode(frame);
+frame.close();
+```
+
+This is the #1 cause of memory leaks. See [Memory Management Guide](/guides/memory-management).
+</Warning>
+
+<Warning>
+**Wrong timestamp units**
+
+```javascript
+❌ Milliseconds (wrong):
+timestamp: i * 33  // Will play 1000x too fast!
+
+✅ Microseconds (correct):
+timestamp: i * 33333
+```
+
+WebCodecs uses **microseconds**, not milliseconds.
+</Warning>
+
+<Warning>
+**Not awaiting flush()**
+
+```javascript
+❌ Encoder closes before finishing:
+encoder.flush();
+encoder.close(); // May lose last frames!
+
+✅ Wait for flush:
+await encoder.flush();
+encoder.close();
+```
+</Warning>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Decode Video" icon="play" href="/getting-started/first-decode">
+    Learn to decode video frames
+  </Card>
+  <Card title="API Reference" icon="book" href="/api/video-encoder">
+    Complete VideoEncoder documentation
+  </Card>
+  <Card title="Cookbook" icon="flask" href="/cookbook/overview">
+    Real-world recipes
+  </Card>
+  <Card title="Hardware Acceleration" icon="microchip" href="/guides/hardware-acceleration">
+    8-15x faster encoding
+  </Card>
+</CardGroup>

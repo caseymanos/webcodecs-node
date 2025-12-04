@@ -1,0 +1,135 @@
+---
+title: "node-webcodecs"
+description: "WebCodecs API for Node.js — Frame-level video encoding and decoding"
+---
+
+# WebCodecs for Node.js
+
+Native WebCodecs API implementation for Node.js, using FFmpeg for encoding and decoding. Frame-level video and audio processing without subprocess overhead.
+
+<CardGroup cols={2}>
+  <Card title="Quick Start" icon="rocket" href="/getting-started/quick-start">
+    Get encoding in 5 minutes
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/overview">
+    Complete API documentation
+  </Card>
+  <Card title="Migration from FFmpeg" icon="arrow-right" href="/migration/from-ffmpeg-cli">
+    Switch from FFmpeg CLI
+  </Card>
+  <Card title="Examples" icon="flask" href="/examples/basic-encoding">
+    Working code examples
+  </Card>
+</CardGroup>
+
+## Why node-webcodecs?
+
+<AccordionGroup>
+  <Accordion title="Frame-accurate control" icon="bullseye">
+    Encode and decode video frame-by-frame with precise control over every aspect. Set keyframes exactly where you want them, not where FFmpeg decides.
+  </Accordion>
+
+  <Accordion title="Real programming, not filter strings" icon="code">
+    Use JavaScript conditionals, loops, and variables instead of cryptic FFmpeg filter syntax. Debug with breakpoints, not stderr parsing.
+  </Accordion>
+
+  <Accordion title="Browser API parity" icon="window">
+    Same API as browser WebCodecs. Write effects once, run in both browser preview and server export. No more parity bugs.
+  </Accordion>
+
+  <Accordion title="Hardware acceleration" icon="microchip">
+    Access platform encoders (VideoToolbox, NVENC, QuickSync, VA-API) for 8-15x faster encoding with optional worker threads.
+  </Accordion>
+</AccordionGroup>
+
+## Installation
+
+<CodeGroup>
+```bash npm
+npm install node-webcodecs
+```
+
+```bash bun
+bun add node-webcodecs
+```
+</CodeGroup>
+
+<Note>
+  **Prerequisites:** Node.js 18+, FFmpeg libraries (libavcodec, libavformat, libavutil)
+
+  See [Installation Guide](/getting-started/installation) for platform-specific setup.
+</Note>
+
+## Quick Example
+
+```typescript
+import { VideoEncoder, VideoFrame } from 'node-webcodecs';
+
+const encoder = new VideoEncoder({
+  output: (chunk, metadata) => {
+    console.log(`Encoded ${chunk.byteLength} bytes`);
+  },
+  error: (err) => console.error(err)
+});
+
+encoder.configure({
+  codec: 'avc1.42E01E',
+  width: 1920,
+  height: 1080,
+  bitrate: 5_000_000
+});
+
+// Encode frames
+const frame = new VideoFrame(buffer, {
+  format: 'RGBA',
+  codedWidth: 1920,
+  codedHeight: 1080,
+  timestamp: 0
+});
+
+encoder.encode(frame);
+frame.close(); // Important: prevent memory leaks
+```
+
+## Use Cases
+
+<CardGroup cols={3}>
+  <Card title="Isomorphic Video Editors" icon="video">
+    Same effects code in browser and server. Visual parity guaranteed.
+  </Card>
+  <Card title="WebRTC Recording" icon="record-vinyl">
+    Decode, composite, and re-encode in the same Node process.
+  </Card>
+  <Card title="Live Highlight Clipping" icon="scissors">
+    Frame-accurate clips from live streams with no timestamp drift.
+  </Card>
+  <Card title="Video Ingest Validation" icon="shield-check">
+    Frame-by-frame quality assurance, not just metadata parsing.
+  </Card>
+  <Card title="Personalized Video" icon="user">
+    Actual programming for template-based video assembly.
+  </Card>
+  <Card title="HDR & Wide Gamut" icon="palette">
+    BT.2020 primaries, PQ/HLG transfer functions natively supported.
+  </Card>
+</CardGroup>
+
+## Next Steps
+
+<Steps>
+  <Step title="Install">
+    Follow the [installation guide](/getting-started/installation) for your platform
+  </Step>
+  <Step title="Quick Start">
+    Complete the [5-minute tutorial](/getting-started/quick-start)
+  </Step>
+  <Step title="Explore">
+    Browse [cookbook recipes](/cookbook/overview) for your use case
+  </Step>
+</Steps>
+
+## Community & Support
+
+- **GitHub Issues**: [Report bugs or request features](https://github.com/caseymanos/node-webcodecs/issues)
+- **npm Package**: [node-webcodecs on npm](https://www.npmjs.com/package/node-webcodecs)
+- **License**: MIT

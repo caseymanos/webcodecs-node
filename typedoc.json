@@ -1,0 +1,44 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "entryPoints": ["./src"],
+  "entryPointStrategy": "expand",
+  "out": "./docs/api-reference",
+  "plugin": ["typedoc-plugin-markdown"],
+  "readme": "none",
+  "hideGenerator": true,
+  "excludePrivate": true,
+  "excludeProtected": true,
+  "excludeInternal": true,
+  "sort": ["source-order"],
+  "gitRevision": "master",
+  "name": "node-webcodecs API Reference",
+  "includeVersion": true,
+  "outputFileStrategy": "modules",
+  "flattenOutputFiles": false,
+  "fileExtension": ".mdx",
+  "excludeExternals": true,
+  "excludeNotDocumented": false,
+  "validation": {
+    "notExported": false,
+    "invalidLink": true,
+    "notDocumented": false
+  },
+  "commentStyle": "jsdoc",
+  "blockTags": [
+    "@example",
+    "@see",
+    "@param",
+    "@returns",
+    "@throws",
+    "@deprecated",
+    "@default",
+    "@remarks"
+  ],
+  "modifierTags": [
+    "@public",
+    "@private",
+    "@protected",
+    "@internal",
+    "@readonly"
+  ]
+}

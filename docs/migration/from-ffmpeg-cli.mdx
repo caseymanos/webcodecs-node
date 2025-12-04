@@ -1,0 +1,774 @@
+---
+title: "Migrating from FFmpeg CLI"
+description: "10 common FFmpeg patterns translated to node-webcodecs"
+---
+
+# Migrating from FFmpeg CLI to node-webcodecs
+
+Stop fighting with filter strings. Start writing actual code.
+
+## Why Migrate?
+
+<CardGroup cols={2}>
+  <Card title="Debuggable" icon="bug">
+    Breakpoints and stack traces instead of stderr parsing
+  </Card>
+  <Card title="Testable" icon="vial">
+    Unit test your video logic with Jest/Mocha
+  </Card>
+  <Card title="Conditional Logic" icon="code-branch">
+    Use if/else, loops, variables — not filter DSL
+  </Card>
+  <Card title="Type Safe" icon="shield-check">
+    TypeScript catches errors before encoding starts
+  </Card>
+</CardGroup>
+
+## Pattern Comparison
+
+### 1. Basic Transcoding
+
+<Tabs>
+  <Tab title="FFmpeg CLI">
+    ```bash
+    ffmpeg -i input.mp4 \
+      -c:v libx264 \
+      -preset medium \
+      -crf 23 \
+      output.mp4
+    ```
+
+    **Problems:**
+    - Can't inspect frames
+    - No programmatic control
+    - Hard to test
+  </Tab>
+
+  <Tab title="node-webcodecs">
+    ```typescript
+    import { VideoDecoder, VideoEncoder, EncodedVideoChunk } from 'node-webcodecs';
+    import fs from 'fs';
+
+    async function transcode(inputFile: string, outputFile: string) {
+      const chunks: EncodedVideoChunk[] = [];
+
+      // Decode
+      const decoder = new VideoDecoder({
+        output: (frame) => {
+          // Re-encode each frame
+          encoder.encode(frame);
+          frame.close();
+        },
+        error: (err) => console.error(err)
+      });
+
+      decoder.configure({
+        codec: 'avc1.640028',  // Input codec
+        // ... codec details
+      });
+
+      // Encode
+      const encoder = new VideoEncoder({
+        output: (chunk) => chunks.push(chunk),
+        error: (err) => console.error(err)
+      });
+
+      encoder.configure({
+        codec: 'avc1.42E01E',
+        width: 1920,
+        height: 1080,
+        bitrate: 5_000_000  // Equivalent to CRF 23
+      });
+
+      // ... decode input, encode output
+      await encoder.flush();
+
+      // Save to file
+      const output = Buffer.concat(chunks.map(c => {
+        const buf = Buffer.alloc(c.byteLength);
+        c.copyTo(buf);
+        return buf;
+      }));
+      fs.writeFileSync(outputFile, output);
+    }
+    ```
+
+    **Benefits:**
+    - Inspect/modify each frame
+    - Programmatic bitrate control
+    - Error handling with try/catch
+  </Tab>
+</Tabs>
+
+---
+
+### 2. Text Overlay (Dynamic)
+
+<Tabs>
+  <Tab title="FFmpeg CLI">
+    ```bash
+    # Static text only
+    ffmpeg -i input.mp4 \
+      -vf "drawtext=text='Hello':x=100:y=100:fontsize=24" \
+      output.mp4
+    ```
+
+    **Limitations:**
+    - Text is fixed at encode time
+    - Can't use variables
+    - No conditional display
+    - String escaping nightmare for special chars
+  </Tab>
+
+  <Tab title="node-webcodecs">
+    ```typescript
+    import { createCanvas } from 'canvas';  // node-canvas
+
+    for await (const frame of decodeVideo('input.mp4')) {
+      const t = frame.timestamp / 1_000_000;  // seconds
+
+      // Real programming!
+      if (t >= 2 && t <= 10) {
+        const canvas = frameToCanvas(frame);
+        const ctx = canvas.getContext('2d');
+
+        // Dynamic text based on time
+        const text = t < 5 ? 'Beginning' : 'Ending';
+
+        ctx.font = '24px Arial';
+        ctx.fillStyle = 'white';
+        ctx.strokeStyle = 'black';
+        ctx.lineWidth = 2;
+        ctx.strokeText(text, 100, 100);
+        ctx.fillText(text, 100, 100);
+
+        const newFrame = canvasToFrame(canvas, frame.timestamp);
+        encoder.encode(newFrame);
+        newFrame.close();
+      } else {
+        // Pass through without text
+        encoder.encode(frame);
+      }
+
+      frame.close();
+    }
+    ```
+
+    **Benefits:**
+    - Conditional text display
+    - Dynamic content (variables, API calls)
+    - Easy to unit test
+    - TypeScript autocomplete for canvas API
+  </Tab>
+</Tabs>
+
+---
+
+### 3. Watermark Overlay
+
+<Tabs>
+  <Tab title="FFmpeg CLI">
+    ```bash
+    ffmpeg -i input.mp4 -i logo.png \
+      -filter_complex "[0:v][1:v]overlay=x=10:y=10" \
+      output.mp4
+    ```
+
+    **Limitations:**
+    - Fixed position only
+    - Can't animate
+    - No conditional display
+  </Tab>
+
+  <Tab title="node-webcodecs">
+    ```typescript
+    import { ImageDecoder } from 'node-webcodecs';
+    import sharp from 'sharp';
+
+    // Load logo once
+    const logoImage = await sharp('logo.png')
+      .resize(200, 100)
+      .toBuffer();
+
+    for await (const frame of decodeVideo('input.mp4')) {
+      const t = frame.timestamp / 1_000_000;
+
+      // Conditional watermark
+      if (shouldShowWatermark(t)) {
+        // Animated position
+        const x = t < 5 ? 10 : 100 + Math.sin(t) * 50;
+        const y = 10;
+
+        // Composite logo onto frame
+        const composited = await composite(frame, logoImage, { x, y });
+        encoder.encode(composited);
+        composited.close();
+      } else {
+        encoder.encode(frame);
+      }
+
+      frame.close();
+    }
+    ```
+
+    **Benefits:**
+    - Animated position with Math functions
+    - Conditional display (e.g., only show for premium users)
+    - Can load logo from API
+    - Fade in/out with alpha blending
+  </Tab>
+</Tabs>
+
+---
+
+### 4. Extract Thumbnails
+
+<Tabs>
+  <Tab title="FFmpeg CLI">
+    ```bash
+    ffmpeg -i input.mp4 \
+      -vf "select='eq(n,0)+eq(n,100)+eq(n,200)'" \
+      -vsync 0 \
+      thumb%03d.jpg
+    ```
+
+    **Limitations:**
+    - Frame numbers, not timestamps
+    - Can't inspect frame content
+    - No quality validation
+  </Tab>
+
+  <Tab title="node-webcodecs">
+    ```typescript
+    import sharp from 'sharp';
+
+    async function extractThumbnails(
+      inputFile: string,
+      times: number[] // Seconds
+    ): Promise<Buffer[]> {
+      const thumbnails: Buffer[] = [];
+
+      for await (const frame of decodeVideo(inputFile)) {
+        const t = frame.timestamp / 1_000_000;
+
+        if (times.includes(Math.floor(t))) {
+          // Validate frame quality
+          if (!isBlackFrame(frame) && !isFrozenFrame(frame)) {
+            const jpg = await frameToJPEG(frame, { quality: 90 });
+            thumbnails.push(jpg);
+          }
+        }
+
+        frame.close();
+      }
+
+      return thumbnails;
+    }
+
+    // Smart thumbnail selection
+    const thumbs = await extractThumbnails('input.mp4', [0, 30, 60, 90]);
+    ```
+
+    **Benefits:**
+    - Time-based selection
+    - Quality validation (skip black/frozen frames)
+    - Programmatic quality control
+    - Can analyze frame content before saving
+  </Tab>
+</Tabs>
+
+---
+
+### 5. Resize Video
+
+<Tabs>
+  <Tab title="FFmpeg CLI">
+    ```bash
+    ffmpeg -i input.mp4 \
+      -vf "scale=1280:720" \
+      output.mp4
+    ```
+  </Tab>
+
+  <Tab title="node-webcodecs">
+    ```typescript
+    import sharp from 'sharp';
+
+    async function resizeVideo(
+      inputFile: string,
+      width: number,
+      height: number
+    ) {
+      const encoder = new VideoEncoder({
+        output: (chunk) => saveChunk(chunk),
+        error: (err) => console.error(err)
+      });
+
+      encoder.configure({
+        codec: 'avc1.42E01E',
+        width,  // New dimensions
+        height,
+        bitrate: width * height * 3 // Auto-scale bitrate
+      });
+
+      for await (const frame of decodeVideo(inputFile)) {
+        // Resize frame
+        const resized = await resizeFrame(frame, width, height);
+
+        encoder.encode(resized);
+        resized.close();
+        frame.close();
+      }
+
+      await encoder.flush();
+    }
+    ```
+
+    **Benefits:**
+    - Auto-scale bitrate based on dimensions
+    - Custom resize algorithms (sharp has 10+ methods)
+    - Preserve aspect ratio with smart cropping
+  </Tab>
+</Tabs>
+
+---
+
+### 6. Concatenate Videos
+
+<Tabs>
+  <Tab title="FFmpeg CLI">
+    ```bash
+    # Create file list
+    echo "file 'video1.mp4'" > list.txt
+    echo "file 'video2.mp4'" >> list.txt
+
+    ffmpeg -f concat -safe 0 -i list.txt \
+      -c copy output.mp4
+    ```
+
+    **Limitations:**
+    - Requires intermediate file
+    - Must have same codec/dimensions
+    - No transition effects
+  </Tab>
+
+  <Tab title="node-webcodecs">
+    ```typescript
+    async function concatenateVideos(files: string[]) {
+      let currentTimestamp = 0;
+
+      for (const file of files) {
+        for await (const frame of decodeVideo(file)) {
+          // Renumber timestamps for continuous playback
+          const adjustedFrame = new VideoFrame(frame, {
+            timestamp: currentTimestamp
+          });
+
+          encoder.encode(adjustedFrame);
+          adjustedFrame.close();
+          frame.close();
+
+          currentTimestamp += frame.duration || 33333;
+        }
+      }
+
+      await encoder.flush();
+    }
+
+    // With transitions
+    async function concatenateWithTransitions(files: string[]) {
+      for (let i = 0; i < files.length; i++) {
+        const nextFile = files[i + 1];
+
+        for await (const frame of decodeVideo(files[i])) {
+          const t = frame.timestamp / 1_000_000;
+          const isLastSecond = isNearEnd(frame, files[i]);
+
+          if (isLastSecond && nextFile) {
+            // Cross-fade with next video
+            const nextFrame = await getFrameAt(nextFile, 0);
+            const blended = blendFrames(frame, nextFrame, t);
+            encoder.encode(blended);
+            blended.close();
+            nextFrame.close();
+          } else {
+            encoder.encode(frame);
+          }
+
+          frame.close();
+        }
+      }
+    }
+    ```
+
+    **Benefits:**
+    - No intermediate files
+    - Add transition effects
+    - Different codecs/dimensions (auto-convert)
+    - Conditional logic between clips
+  </Tab>
+</Tabs>
+
+---
+
+### 7. Speed Up/Slow Down
+
+<Tabs>
+  <Tab title="FFmpeg CLI">
+    ```bash
+    # 2x speed
+    ffmpeg -i input.mp4 \
+      -filter:v "setpts=0.5*PTS" \
+      -filter:a "atempo=2.0" \
+      output.mp4
+    ```
+
+    **Limitations:**
+    - Fixed multiplier
+    - Can't have variable speed
+    - PTS math is confusing
+  </Tab>
+
+  <Tab title="node-webcodecs">
+    ```typescript
+    async function changeSpeed(
+      inputFile: string,
+      speedMultiplier: number
+    ) {
+      let outputTimestamp = 0;
+      const frameDuration = Math.floor(33333 / speedMultiplier);
+
+      for await (const frame of decodeVideo(inputFile)) {
+        const newFrame = new VideoFrame(frame, {
+          timestamp: outputTimestamp,
+          duration: frameDuration
+        });
+
+        encoder.encode(newFrame);
+        newFrame.close();
+        frame.close();
+
+        outputTimestamp += frameDuration;
+      }
+    }
+
+    // Variable speed (timelapse → normal → slow-mo)
+    async function variableSpeed(inputFile: string) {
+      let outputTimestamp = 0;
+
+      for await (const frame of decodeVideo(inputFile)) {
+        const t = frame.timestamp / 1_000_000;
+
+        // Different speed in each segment
+        const speed =
+          t < 10 ? 4.0 :  // 4x timelapse
+          t < 20 ? 1.0 :  // Normal
+          0.5;            // 0.5x slow motion
+
+        const duration = Math.floor(33333 / speed);
+
+        const newFrame = new VideoFrame(frame, {
+          timestamp: outputTimestamp,
+          duration
+        });
+
+        encoder.encode(newFrame);
+        newFrame.close();
+        frame.close();
+
+        outputTimestamp += duration;
+      }
+    }
+    ```
+
+    **Benefits:**
+    - Variable speed throughout video
+    - Easy timestamp math
+    - Frame-accurate control
+  </Tab>
+</Tabs>
+
+---
+
+### 8. Extract Audio
+
+<Tabs>
+  <Tab title="FFmpeg CLI">
+    ```bash
+    ffmpeg -i input.mp4 \
+      -vn -acodec copy \
+      output.aac
+    ```
+  </Tab>
+
+  <Tab title="node-webcodecs">
+    ```typescript
+    import { AudioDecoder, AudioEncoder } from 'node-webcodecs';
+
+    async function extractAudio(inputFile: string, outputFile: string) {
+      const chunks: EncodedAudioChunk[] = [];
+
+      const encoder = new AudioEncoder({
+        output: (chunk) => chunks.push(chunk),
+        error: (err) => console.error(err)
+      });
+
+      encoder.configure({
+        codec: 'mp4a.40.2',  // AAC
+        sampleRate: 48000,
+        numberOfChannels: 2,
+        bitrate: 128000
+      });
+
+      for await (const audio of decodeAudio(inputFile)) {
+        // Optional: analyze/modify audio
+        if (hasSilence(audio)) {
+          // Skip silent segments
+          audio.close();
+          continue;
+        }
+
+        encoder.encode(audio);
+        audio.close();
+      }
+
+      await encoder.flush();
+
+      // Save to file
+      const output = Buffer.concat(chunks.map(c => {
+        const buf = Buffer.alloc(c.byteLength);
+        c.copyTo(buf);
+        return buf;
+      }));
+      fs.writeFileSync(outputFile, output);
+    }
+    ```
+
+    **Benefits:**
+    - Skip silent segments
+    - Analyze audio levels
+    - Apply filters/effects
+    - Conditional encoding
+  </Tab>
+</Tabs>
+
+---
+
+### 9. Create Slideshow from Images
+
+<Tabs>
+  <Tab title="FFmpeg CLI">
+    ```bash
+    ffmpeg -framerate 1/3 \
+      -pattern_type glob -i '*.jpg' \
+      -c:v libx264 \
+      output.mp4
+    ```
+
+    **Limitations:**
+    - All images same duration
+    - No transitions
+    - Glob patterns can be unreliable
+  </Tab>
+
+  <Tab title="node-webcodecs">
+    ```typescript
+    import { ImageDecoder, VideoFrame } from 'node-webcodecs';
+    import sharp from 'sharp';
+
+    interface Slide {
+      image: string;
+      duration: number;  // seconds
+      transition?: 'fade' | 'slide' | 'none';
+    }
+
+    async function createSlideshow(slides: Slide[]) {
+      const fps = 30;
+      const frameDuration = Math.floor(1_000_000 / fps);
+      let timestamp = 0;
+
+      for (let i = 0; i < slides.length; i++) {
+        const slide = slides[i];
+        const nextSlide = slides[i + 1];
+
+        // Load image
+        const imageBuffer = await sharp(slide.image)
+          .resize(1920, 1080, { fit: 'contain' })
+          .toBuffer();
+
+        const totalFrames = Math.floor(slide.duration * fps);
+
+        for (let f = 0; f < totalFrames; f++) {
+          let frameData = imageBuffer;
+
+          // Transition effect
+          if (nextSlide && f > totalFrames - fps) {
+            // Last second: transition to next slide
+            const progress = (f - (totalFrames - fps)) / fps;
+            const nextImage = await sharp(nextSlide.image)
+              .resize(1920, 1080, { fit: 'contain' })
+              .toBuffer();
+
+            frameData = await blendImages(
+              imageBuffer,
+              nextImage,
+              progress
+            );
+          }
+
+          const frame = new VideoFrame(frameData, {
+            format: 'RGBA',
+            codedWidth: 1920,
+            codedHeight: 1080,
+            timestamp,
+            duration: frameDuration
+          });
+
+          encoder.encode(frame, { keyFrame: f === 0 });
+          frame.close();
+
+          timestamp += frameDuration;
+        }
+      }
+
+      await encoder.flush();
+    }
+    ```
+
+    **Benefits:**
+    - Variable duration per slide
+    - Smooth transitions
+    - Programmatic image selection (from DB, API)
+    - Custom effects
+  </Tab>
+</Tabs>
+
+---
+
+### 10. Live Stream Recording
+
+<Tabs>
+  <Tab title="FFmpeg CLI">
+    ```bash
+    ffmpeg -i rtmp://stream.url/live \
+      -c copy \
+      output.mp4
+    ```
+
+    **Limitations:**
+    - Can't process frames
+    - No real-time analysis
+    - Can't create highlights
+  </Tab>
+
+  <Tab title="node-webcodecs">
+    ```typescript
+    import { VideoDecoder, VideoEncoder } from 'node-webcodecs';
+
+    async function recordWithHighlights(streamUrl: string) {
+      const allFrames: VideoFrame[] = [];
+      const highlights: { start: number; end: number }[] = [];
+
+      for await (const frame of decodeStream(streamUrl)) {
+        const t = frame.timestamp / 1_000_000;
+
+        // Real-time analysis
+        const action = await detectAction(frame); // AI model
+
+        if (action.score > 0.8) {
+          // Highlight detected!
+          highlights.push({
+            start: t - 5,  // 5 seconds before
+            end: t + 5     // 5 seconds after
+          });
+        }
+
+        // Record full stream
+        mainEncoder.encode(frame);
+
+        // Also create highlight reel
+        if (isInHighlightRange(t, highlights)) {
+          highlightEncoder.encode(frame);
+        }
+
+        frame.close();
+      }
+
+      // Result: Full recording + auto-generated highlight reel
+      await mainEncoder.flush();
+      await highlightEncoder.flush();
+    }
+    ```
+
+    **Benefits:**
+    - Real-time frame analysis
+    - Auto-generate highlights
+    - Multiple outputs simultaneously
+    - Conditional recording based on content
+  </Tab>
+</Tabs>
+
+---
+
+## Migration Checklist
+
+<Steps>
+  <Step title="Install node-webcodecs">
+    ```bash
+    npm install node-webcodecs
+    ```
+  </Step>
+
+  <Step title="Identify your FFmpeg patterns">
+    List all your current FFmpeg commands and their purposes
+  </Step>
+
+  <Step title="Map to WebCodecs APIs">
+    - Encoding → `VideoEncoder`
+    - Decoding → `VideoDecoder`
+    - Filters → Canvas API or image processing libs
+  </Step>
+
+  <Step title="Refactor with real code">
+    Replace filter strings with JavaScript/TypeScript logic
+  </Step>
+
+  <Step title="Add tests">
+    Unit test your video logic with Jest
+  </Step>
+
+  <Step title="Add type safety">
+    Use TypeScript for compile-time error checking
+  </Step>
+</Steps>
+
+##Advantages Summary
+
+| Feature | FFmpeg CLI | node-webcodecs |
+|---------|-----------|----------------|
+| **Debugging** | stderr parsing | Breakpoints, stack traces |
+| **Conditionals** | ❌ Not possible | ✅ if/else, switch |
+| **Variables** | Limited ENV vars | ✅ Full JavaScript |
+| **Testing** | Shell scripts | ✅ Jest/Mocha unit tests |
+| **Type Safety** | ❌ None | ✅ TypeScript |
+| **Frame Access** | ❌ No | ✅ Every frame |
+| **API Integration** | ❌ Hard | ✅ Easy (fetch, DB) |
+| **Error Handling** | Exit codes | try/catch |
+| **IDE Support** | ❌ None | ✅ Autocomplete |
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="API Reference" icon="book" href="/api/video-encoder">
+    Complete VideoEncoder docs
+  </Card>
+  <Card title="Cookbook" icon="flask" href="/cookbook/overview">
+    More real-world recipes
+  </Card>
+  <Card title="Hardware Acceleration" icon="microchip" href="/guides/hardware-acceleration">
+    8-15x faster encoding
+  </Card>
+  <Card title="Examples" icon="code" href="/examples/basic-encoding">
+    Working code examples
+  </Card>
+</CardGroup>
