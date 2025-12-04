@@ -62,7 +62,7 @@ sudo apt-get install build-essential pkg-config libavcodec-dev libavutil-dev lib
 ## Full Documentation
 
 For complete documentation including all API details, examples, and troubleshooting:
-- llms-full.txt - Complete documentation in a single file (~15,000-20,000 tokens)
+- llms-full.txt - Complete documentation in a single file
 - README.md - Primary documentation
 - examples/ - Working code examples
 
