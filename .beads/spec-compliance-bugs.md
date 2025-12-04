@@ -28,16 +28,41 @@
 - **Actual**: `ondequeue` property doesn't exist on any of these classes
 - **Spec Reference**: https://w3c.github.io/webcodecs/#dom-videoencoder-ondequeue
 
-### 5. Encoding After Flush Hangs
+### 5. Encoding/Decoding After Flush Produces No Output
 - **Severity**: High
-- **Issue**: After calling `flush()` on a VideoEncoder, encoding additional frames and flushing again causes the encoder to hang indefinitely
+- **Issue**: After calling `flush()` on a VideoEncoder, VideoDecoder, AudioEncoder, or AudioDecoder, encoding/decoding additional frames and flushing again produces no output
+- **Affects**: All encoder and decoder classes
 - **Steps to Reproduce**:
   1. Create VideoEncoder, configure with VP8
-  2. Encode a frame, call `flush()` - works fine
-  3. Encode another frame, call `flush()` - hangs forever
-- **Expected**: Encoder should remain in `configured` state after flush and accept new frames
+  2. Encode a frame, call `flush()` - works fine, produces 1 chunk
+  3. Encode more frames, call `flush()` - no additional chunks produced
+- **Expected**: Encoder/decoder should remain in `configured` state after flush and produce output for new data
 - **Spec Reference**: https://w3c.github.io/webcodecs/#dom-videoencoder-flush
+
+### 6. Reset Then Reconfigure Crashes
+- **Severity**: CRITICAL
+- **Issue**: Calling `reset()` on any encoder/decoder, then calling `configure()` and attempting to encode/decode causes a native crash
+- **Affects**: VideoEncoder, VideoDecoder, AudioEncoder, AudioDecoder
+- **Error Messages**:
+  - VideoEncoder/VideoDecoder: `terminate called without an active exception`
+  - AudioEncoder: `malloc(): invalid size (unsorted)` (memory corruption)
+- **Steps to Reproduce**:
+  1. Create VideoEncoder, configure with VP8
+  2. Encode a frame, call `flush()`
+  3. Call `reset()` - state becomes 'unconfigured'
+  4. Call `configure()` with new settings - state becomes 'configured'
+  5. Encode a frame -> **CRASH**
+- **Expected**: Per spec, `reset()` should allow the encoder/decoder to be reconfigured and used again
+- **Spec Reference**: https://w3c.github.io/webcodecs/#dom-videoencoder-reset
+- **Workaround**: Create a new encoder/decoder instance instead of calling reset()
 
 ## Test Coverage
 
 All bugs above are covered by tests in `test/spec-compliance/`. Tests are written to be lenient where needed to pass in both browser and node-webcodecs, but the bugs are documented here.
+
+Tests that would crash are marked with `it.skip()` to prevent test suite failures:
+- `should allow reconfigure and encode after reset` (VideoEncoder)
+- `should discard pending work when reset() is called` (VideoDecoder)  
+- `should allow reconfigure and decode after reset` (VideoDecoder)
+- `should allow reconfigure and encode after reset` (AudioEncoder)
+- `should allow reconfigure and decode after reset` (AudioDecoder)
