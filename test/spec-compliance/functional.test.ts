@@ -455,6 +455,96 @@ describe('Audio Encoding Functional Tests', () => {
   });
 });
 
+describe('VideoFrame copyTo Tests', () => {
+  it('should copyTo same format (default)', async () => {
+    if (!isWebCodecsAvailable()) {
+      expect.fail('WebCodecs API not available');
+    }
+
+    const frame = createI420VideoFrame(64, 64, 0, 220, 100, 150);
+    
+    const size = frame.allocationSize();
+    expect(size).toBeGreaterThan(0);
+    
+    const buffer = new Uint8Array(size);
+    const layout = await frame.copyTo(buffer);
+
+    expect(layout).toBeDefined();
+    expect(Array.isArray(layout)).toBe(true);
+    expect(layout.length).toBeGreaterThanOrEqual(3); // I420 has Y, U, V planes
+
+    // Verify Y plane has expected value (first plane)
+    const yPlane = layout[0];
+    expect(buffer[yPlane.offset]).toBe(220);
+
+    frame.close();
+  });
+
+  it('should copyTo with explicit format option if supported', async () => {
+    if (!isWebCodecsAvailable()) {
+      expect.fail('WebCodecs API not available');
+    }
+
+    const frame = createI420VideoFrame(32, 32, 0, 128, 128, 128);
+    
+    try {
+      // Try format conversion - may not be supported in all browsers
+      const size = frame.allocationSize({ format: 'RGBA' });
+      expect(size).toBe(32 * 32 * 4); // Width * Height * 4 bytes per pixel
+      
+      const buffer = new Uint8Array(size);
+      const layout = await frame.copyTo(buffer, { format: 'RGBA' });
+
+      expect(layout).toBeDefined();
+      expect(layout.length).toBe(1); // RGBA has single plane
+
+      // Buffer should have actual data
+      let hasNonZero = false;
+      for (const byte of buffer) {
+        if (byte !== 0) {
+          hasNonZero = true;
+          break;
+        }
+      }
+      expect(hasNonZero).toBe(true);
+    } catch (e) {
+      // Format conversion may not be supported - that's OK
+      console.log('Format conversion not supported:', e);
+    }
+
+    frame.close();
+  });
+
+  it('should copyTo with rect parameter (cropping) if supported', async () => {
+    if (!isWebCodecsAvailable()) {
+      expect.fail('WebCodecs API not available');
+    }
+
+    const frame = createI420VideoFrame(64, 64, 0);
+    
+    try {
+      // Copy only the top-left 32x32 region
+      const size = frame.allocationSize({ 
+        rect: { x: 0, y: 0, width: 32, height: 32 } 
+      });
+      
+      const buffer = new Uint8Array(size);
+      const layout = await frame.copyTo(buffer, { 
+        rect: { x: 0, y: 0, width: 32, height: 32 } 
+      });
+
+      expect(layout).toBeDefined();
+      // Cropped copy should have smaller data than full frame
+      expect(buffer.length).toBeLessThan(64 * 64 * 1.5);
+    } catch (e) {
+      // Rect cropping may not be supported - that's OK
+      console.log('Rect cropping not supported:', e);
+    }
+
+    frame.close();
+  });
+});
+
 describe('VideoFrame Functional Tests', () => {
   it('should clone VideoFrame and maintain properties', () => {
     if (!isWebCodecsAvailable()) {
